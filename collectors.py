@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import re
 import requests
+
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 HEADERS = {
     "User-Agent": (
@@ -17,6 +23,10 @@ HEADERS = {
 TIMEOUT = 20
 
 
+# ============================================================
+# CANDIDATE MODEL
+# ============================================================
+
 @dataclass
 class Candidate:
     title: str
@@ -26,13 +36,100 @@ class Candidate:
 
 
 # ============================================================
-# DIRECT PUBLIC SOURCES
+# INDIAN CITIES
 # ============================================================
 
-SOURCES = [
+INDIAN_CITIES = [
+    "Hyderabad",
+    "Bengaluru",
+    "Mumbai",
+    "Pune",
+    "Chennai",
+    "Delhi",
+    "Gurugram",
+    "Noida",
+    "Kolkata",
+    "Kochi",
+    "Ahmedabad",
+    "Jaipur",
+    "Chandigarh",
+    "Bhubaneswar",
+    "Lucknow",
+    "Indore",
+    "Coimbatore",
+    "Visakhapatnam",
+]
+
+
+# ============================================================
+# CYBERSECURITY TOPICS
+# ============================================================
+
+CYBER_TOPICS = [
+    "cybersecurity",
+    "cyber security",
+    "information security",
+    "infosec",
+    "application security",
+    "AppSec",
+    "cloud security",
+    "AI security",
+    "network security",
+    "SOC",
+    "blue team",
+    "red team",
+    "penetration testing",
+    "pentesting",
+    "ethical hacking",
+    "VAPT",
+    "vulnerability",
+    "bug bounty",
+    "digital forensics",
+    "DFIR",
+    "incident response",
+    "threat intelligence",
+    "malware",
+    "OSINT",
+    "GRC",
+    "IAM",
+    "identity security",
+    "CTF",
+    "capture the flag",
+]
+
+
+# ============================================================
+# EVENT TYPES
+# ============================================================
+
+EVENT_TYPES = [
+    "event",
+    "meetup",
+    "conference",
+    "workshop",
+    "webinar",
+    "summit",
+    "training",
+    "seminar",
+    "networking",
+    "community",
+    "CTF",
+    "hackathon",
+]
+
+
+# ============================================================
+# PUBLIC DIRECT SOURCES
+# ============================================================
+
+DIRECT_SOURCES = [
     {
         "name": "OWASP Events",
         "url": "https://owasp.org/events/",
+    },
+    {
+        "name": "OWASP Chapters",
+        "url": "https://owasp.org/chapters/",
     },
     {
         "name": "Null Community",
@@ -46,95 +143,18 @@ SOURCES = [
 
 
 # ============================================================
-# RELEVANCE KEYWORDS
+# FETCH
 # ============================================================
 
-CYBER_KEYWORDS = [
-    "cyber",
-    "cybersecurity",
-    "cyber security",
-    "information security",
-    "infosec",
-    "application security",
-    "appsec",
-    "cloud security",
-    "ai security",
-    "network security",
-    "penetration testing",
-    "pentesting",
-    "ethical hacking",
-    "vapt",
-    "vulnerability",
-    "bug bounty",
-    "digital forensics",
-    "dfir",
-    "incident response",
-    "threat intelligence",
-    "malware",
-    "osint",
-    "soc",
-    "blue team",
-    "red team",
-    "grc",
-    "iam",
-    "identity security",
-    "ctf",
-    "capture the flag",
-    "hackathon",
-]
+def fetch(url: str) -> str | None:
 
-
-EVENT_KEYWORDS = [
-    "event",
-    "meetup",
-    "conference",
-    "workshop",
-    "webinar",
-    "summit",
-    "training",
-    "seminar",
-    "networking",
-    "community",
-    "ctf",
-    "hackathon",
-]
-
-
-INDIA_LOCATIONS = [
-    "india",
-    "hyderabad",
-    "bengaluru",
-    "bangalore",
-    "mumbai",
-    "pune",
-    "chennai",
-    "delhi",
-    "gurugram",
-    "gurgaon",
-    "noida",
-    "kolkata",
-    "kochi",
-    "ahmedabad",
-    "jaipur",
-    "chandigarh",
-    "bhubaneswar",
-    "lucknow",
-    "indore",
-    "coimbatore",
-    "visakhapatnam",
-]
-
-
-# ============================================================
-# FETCH PAGE
-# ============================================================
-
-def fetch_page(url: str) -> str | None:
     try:
+
         response = requests.get(
             url,
             headers=HEADERS,
             timeout=TIMEOUT,
+            allow_redirects=True,
         )
 
         print(
@@ -148,52 +168,103 @@ def fetch_page(url: str) -> str | None:
         return response.text
 
     except requests.RequestException as exc:
-        print(f"   ❌ Request error: {exc}")
+
+        print(
+            f"   ❌ Request error: {exc}"
+        )
+
         return None
 
     except Exception as exc:
-        print(f"   ❌ Unexpected error: {exc}")
+
+        print(
+            f"   ❌ Unexpected error: {exc}"
+        )
+
         return None
 
 
 # ============================================================
-# RELEVANCE CHECK
+# NORMALIZE TEXT
 # ============================================================
 
-def is_relevant(title: str, url: str) -> bool:
-    text = f"{title} {url}".lower()
+def normalize(text: str) -> str:
 
-    has_cyber_keyword = any(
-        keyword in text
-        for keyword in CYBER_KEYWORDS
+    text = text.lower()
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
     )
 
-    has_event_keyword = any(
-        keyword in text
-        for keyword in EVENT_KEYWORDS
+    return text.strip()
+
+
+# ============================================================
+# CYBER RELEVANCE
+# ============================================================
+
+def is_cyber_event(
+    title: str,
+    context: str = "",
+) -> bool:
+
+    text = normalize(
+        f"{title} {context}"
+    )
+
+    has_cyber = any(
+        topic.lower() in text
+        for topic in CYBER_TOPICS
+    )
+
+    has_event = any(
+        event.lower() in text
+        for event in EVENT_TYPES
     )
 
     return (
-        has_cyber_keyword
-        and has_event_keyword
+        has_cyber
+        and has_event
     )
 
 
 # ============================================================
-# INDIA / ONLINE LOCATION CHECK
+# LOCATION DETECTION
 # ============================================================
 
-def has_india_location(title: str, url: str) -> bool:
-    text = f"{title} {url}".lower()
+def detect_location(
+    text: str,
+) -> str:
 
-    return any(
-        location in text
-        for location in INDIA_LOCATIONS
-    ) or "online" in text
+    normalized = normalize(text)
+
+    for city in INDIAN_CITIES:
+
+        if city.lower() in normalized:
+
+            return city
+
+        # Bangalore/Bengaluru variations.
+        if city == "Bengaluru":
+            if "bangalore" in normalized:
+                return "Bengaluru"
+
+    if "india" in normalized:
+        return "India"
+
+    if "online" in normalized:
+        return "Online"
+
+    if "virtual" in normalized:
+        return "Online"
+
+    return "Unknown"
 
 
 # ============================================================
-# EXTRACT LINKS
+# SOURCE LINK EXTRACTION
 # ============================================================
 
 def extract_links(
@@ -207,7 +278,7 @@ def extract_links(
         "lxml",
     )
 
-    candidates: list[Candidate] = []
+    candidates = []
 
     for link in soup.find_all(
         "a",
@@ -224,7 +295,10 @@ def extract_links(
             "",
         ).strip()
 
-        if not title or not href:
+        if not title:
+            continue
+
+        if not href:
             continue
 
         url = urljoin(
@@ -237,23 +311,35 @@ def extract_links(
         ):
             continue
 
-        if not is_relevant(
+        # Build nearby context.
+        parent_text = ""
+
+        parent = link.parent
+
+        if parent:
+            parent_text = parent.get_text(
+                " ",
+                strip=True,
+            )
+
+        context = (
+            f"{title} "
+            f"{parent_text} "
+            f"{url}"
+        )
+
+        if not is_cyber_event(
             title,
-            url,
+            context,
         ):
             continue
 
-        # Keep India/online events when
-        # the information is visible in the link.
-        location_match = has_india_location(
-            title,
-            url,
+        location = detect_location(
+            context
         )
 
         description = (
-            "India/Online location signal detected."
-            if location_match
-            else ""
+            f"Location signal: {location}"
         )
 
         candidates.append(
@@ -269,110 +355,316 @@ def extract_links(
 
 
 # ============================================================
-# COLLECT FROM ONE SOURCE
+# DIRECT SOURCE COLLECTION
 # ============================================================
 
-def collect_from_source(
-    source: dict,
-) -> list[Candidate]:
+def collect_direct_sources() -> list[Candidate]:
 
     print()
     print("=" * 60)
-    print(
-        f"🌐 SOURCE: {source['name']}"
-    )
-    print(
-        f"   URL: {source['url']}"
-    )
+    print("🌐 DIRECT PUBLIC EVENT SOURCES")
+    print("=" * 60)
 
-    html = fetch_page(
-        source["url"]
-    )
+    candidates = []
 
-    if not html:
+    for source in DIRECT_SOURCES:
+
+        print()
         print(
-            "   ❌ Source unavailable"
+            f"🔎 {source['name']}"
         )
-        return []
 
-    candidates = extract_links(
-        html=html,
-        base_url=source["url"],
-        source_name=source["name"],
-    )
+        print(
+            f"   {source['url']}"
+        )
 
-    print(
-        f"   Candidates found: "
-        f"{len(candidates)}"
-    )
+        html = fetch(
+            source["url"]
+        )
+
+        if not html:
+
+            print(
+                "   ❌ Could not access source"
+            )
+
+            continue
+
+        source_candidates = extract_links(
+            html=html,
+            base_url=source["url"],
+            source_name=source["name"],
+        )
+
+        print(
+            f"   Candidates: "
+            f"{len(source_candidates)}"
+        )
+
+        candidates.extend(
+            source_candidates
+        )
 
     return candidates
 
 
 # ============================================================
-# MAIN COLLECTION
+# CITY/TOPIC SEARCH PAGES
+#
+# These are public search URLs, not APIs.
+# They are additional discovery paths.
 # ============================================================
 
-def collect_candidates() -> list[Candidate]:
+SEARCH_TEMPLATES = [
+    (
+        "Eventbrite",
+        "https://www.eventbrite.com/d/india/{query}/"
+    ),
+    (
+        "Meetup",
+        "https://www.meetup.com/find/?keywords={query}&source=EVENTS"
+    ),
+    (
+        "Luma",
+        "https://lu.ma/discover?q={query}"
+    ),
+]
 
-    print("=" * 60)
-    print(
-        "🔎 DIRECT EVENT SOURCE COLLECTION"
+
+def build_search_queries() -> list[str]:
+
+    queries = []
+
+    # General India searches.
+    for topic in CYBER_TOPICS:
+
+        queries.append(
+            f"{topic} India event"
+        )
+
+    # City + cybersecurity.
+    for city in INDIAN_CITIES:
+
+        queries.append(
+            f"cybersecurity {city}"
+        )
+
+        queries.append(
+            f"cyber security {city} meetup"
+        )
+
+        queries.append(
+            f"infosec {city} event"
+        )
+
+        queries.append(
+            f"security conference {city}"
+        )
+
+        queries.append(
+            f"security workshop {city}"
+        )
+
+        queries.append(
+            f"CTF {city}"
+        )
+
+        queries.append(
+            f"cybersecurity networking {city}"
+        )
+
+    # Important community combinations.
+    for city in INDIAN_CITIES:
+
+        queries.append(
+            f"OWASP {city}"
+        )
+
+        queries.append(
+            f"Null security {city}"
+        )
+
+        queries.append(
+            f"BSides {city}"
+        )
+
+    # Remove duplicates.
+    return list(
+        dict.fromkeys(queries)
     )
+
+
+# ============================================================
+# SEARCH PAGE COLLECTION
+# ============================================================
+
+def collect_search_pages() -> list[Candidate]:
+
+    print()
+    print("=" * 60)
+    print("🔎 CITY + TOPIC EVENT DISCOVERY")
     print("=" * 60)
 
-    all_candidates: list[Candidate] = []
+    queries = build_search_queries()
 
-    for source in SOURCES:
+    print(
+        f"📋 Discovery queries: "
+        f"{len(queries)}"
+    )
 
-        candidates = collect_from_source(
-            source
+    candidates = []
+
+    # Limit per workflow to avoid excessive
+    # requests to public websites.
+    max_queries = 80
+
+    for number, query in enumerate(
+        queries[:max_queries],
+        start=1,
+    ):
+
+        print()
+        print(
+            f"[{number}/{min(len(queries), max_queries)}] "
+            f"{query}"
         )
 
-        all_candidates.extend(
-            candidates
+        encoded_query = quote(
+            query
         )
 
-    # --------------------------------------------------------
-    # Deduplicate by normalized URL
-    # --------------------------------------------------------
+        for source_name, template in (
+            SEARCH_TEMPLATES
+        ):
 
-    unique_candidates: dict[
-        str,
-        Candidate
-    ] = {}
+            search_url = template.format(
+                query=encoded_query
+            )
 
-    for candidate in all_candidates:
+            print(
+                f"   → {source_name}"
+            )
 
-        normalized_url = (
+            html = fetch(
+                search_url
+            )
+
+            if not html:
+                continue
+
+            source_candidates = extract_links(
+                html=html,
+                base_url=search_url,
+                source_name=source_name,
+            )
+
+            if source_candidates:
+
+                print(
+                    f"      Found: "
+                    f"{len(source_candidates)}"
+                )
+
+                candidates.extend(
+                    source_candidates
+                )
+
+    return candidates
+
+
+# ============================================================
+# DEDUPLICATION
+# ============================================================
+
+def deduplicate(
+    candidates: list[Candidate],
+) -> list[Candidate]:
+
+    unique = {}
+
+    for candidate in candidates:
+
+        url = (
             candidate.url
             .strip()
             .rstrip("/")
         )
 
-        if normalized_url not in unique_candidates:
-            unique_candidates[
-                normalized_url
-            ] = candidate
+        if not url:
+            continue
 
-    candidates = list(
-        unique_candidates.values()
+        if url not in unique:
+
+            unique[url] = candidate
+
+    return list(
+        unique.values()
+    )
+
+
+# ============================================================
+# MAIN COLLECTOR
+# ============================================================
+
+def collect_candidates() -> list[Candidate]:
+
+    print("=" * 60)
+    print("🇮🇳 INDIA CYBERSECURITY EVENT DISCOVERY")
+    print("=" * 60)
+
+    all_candidates = []
+
+    # --------------------------------------------------------
+    # 1. Direct community sources
+    # --------------------------------------------------------
+
+    direct_candidates = (
+        collect_direct_sources()
+    )
+
+    all_candidates.extend(
+        direct_candidates
     )
 
     # --------------------------------------------------------
-    # Final output
+    # 2. City + topic discovery
+    # --------------------------------------------------------
+
+    search_candidates = (
+        collect_search_pages()
+    )
+
+    all_candidates.extend(
+        search_candidates
+    )
+
+    # --------------------------------------------------------
+    # 3. Deduplicate
+    # --------------------------------------------------------
+
+    candidates = deduplicate(
+        all_candidates
+    )
+
+    # --------------------------------------------------------
+    # 4. Final report
     # --------------------------------------------------------
 
     print()
     print("=" * 60)
+    print(
+        f"📦 RAW CANDIDATES: "
+        f"{len(all_candidates)}"
+    )
     print(
         f"✅ UNIQUE CANDIDATES: "
         f"{len(candidates)}"
     )
     print("=" * 60)
 
+    # Show first 50 only.
     for number, candidate in enumerate(
-        candidates,
+        candidates[:50],
         start=1,
     ):
 
@@ -388,15 +680,22 @@ def collect_candidates() -> list[Candidate]:
         )
 
         print(
+            f"    {candidate.description}"
+        )
+
+        print(
             f"    URL: "
             f"{candidate.url}"
         )
 
-        if candidate.description:
-            print(
-                f"    Description: "
-                f"{candidate.description}"
-            )
+    if len(candidates) > 50:
+
+        print()
+        print(
+            f"... and "
+            f"{len(candidates) - 50} "
+            f"additional candidates."
+        )
 
     return candidates
 
@@ -406,4 +705,5 @@ def collect_candidates() -> list[Candidate]:
 # ============================================================
 
 if __name__ == "__main__":
+
     collect_candidates()
