@@ -1,10 +1,9 @@
 import re
 import requests
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlparse
 
 from sources import INDIAN_LOCATIONS, CYBERSECURITY_KEYWORDS
-
 
 HEADERS = {
     "User-Agent": (
@@ -14,20 +13,55 @@ HEADERS = {
     )
 }
 
+RSS_SEARCHES = [
+    "cybersecurity event India",
+    "cyber security event India",
+    "infosec event India",
+    "cybersecurity meetup India",
+    "cyber security meetup India",
+    "cybersecurity conference India",
+    "cybersecurity workshop India",
+    "cybersecurity CTF India",
+    "security meetup India",
+    "security conference India",
+    "OWASP India event",
+    "Null India cybersecurity meetup",
+    "BSides India cybersecurity",
+    "AppSec India event",
+    "Cloud Security India event",
+    "AI Security India event",
+    "DFIR India event",
+    "OSINT India event",
+    "bug bounty India event",
+    "VAPT India event",
+    "GRC India event",
+    "IAM India event",
+    "network security India event",
+]
 
-# ============================================================
-# SEARCH
-# ============================================================
+EVENT_WORDS = [
+    "event",
+    "meetup",
+    "conference",
+    "workshop",
+    "summit",
+    "webinar",
+    "ctf",
+    "hackathon",
+    "networking",
+    "seminar",
+    "community",
+    "session",
+    "talk",
+    "training",
+]
 
-def search_web(query):
-    """
-    Search DuckDuckGo public HTML results.
-    No paid API required.
-    """
 
+def search_google_news(query):
+    """Search Google News RSS without an API key."""
     url = (
-        "https://html.duckduckgo.com/html/"
-        f"?q={quote(query)}"
+        "https://news.google.com/rss/search?"
+        f"q={quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
     )
 
     try:
@@ -36,175 +70,46 @@ def search_web(query):
             headers=HEADERS,
             timeout=20
         )
-
         response.raise_for_status()
-
     except requests.RequestException as error:
-        print(f"❌ Search failed: {error}")
+        print(f"❌ RSS search failed: {error}")
         return []
 
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as error:
+        print(f"❌ RSS parsing failed: {error}")
+        return []
 
     results = []
 
-    for result in soup.select(".result"):
+    for item in root.findall(".//item"):
+        title = item.findtext("title", default="").strip()
+        link = item.findtext("link", default="").strip()
+        description = item.findtext("description", default="").strip()
+        pub_date = item.findtext("pubDate", default="").strip()
 
-        title_element = result.select_one(
-            ".result__title"
-        )
-
-        link_element = result.select_one(
-            ".result__a"
-        )
-
-        snippet_element = result.select_one(
-            ".result__snippet"
-        )
-
-        if not title_element or not link_element:
-            continue
-
-        title = title_element.get_text(
-            " ",
-            strip=True
-        )
-
-        url = link_element.get("href")
-
-        snippet = ""
-
-        if snippet_element:
-            snippet = snippet_element.get_text(
-                " ",
-                strip=True
-            )
-
-        if not url:
+        if not title or not link:
             continue
 
         results.append({
             "title": title,
-            "url": url,
-            "snippet": snippet
+            "url": link,
+            "snippet": description,
+            "published": pub_date,
         })
 
     return results
 
 
-# ============================================================
-# SEARCH QUERY GENERATOR
-# ============================================================
-
-def generate_queries():
-
-    queries = []
-
-    # --------------------------------------------------------
-    # INDIA-WIDE SEARCHES
-    # --------------------------------------------------------
-
-    queries.extend([
-        '"cybersecurity" event India',
-        '"cyber security" event India',
-        '"information security" event India',
-        '"infosec" event India',
-        '"cybersecurity meetup" India',
-        '"cyber security meetup" India',
-        '"cybersecurity conference" India',
-        '"cybersecurity workshop" India',
-        '"cybersecurity CTF" India',
-        '"security meetup" India',
-        '"security conference" India'
-    ])
-
-    # --------------------------------------------------------
-    # COMMUNITY SEARCHES
-    # --------------------------------------------------------
-
-    queries.extend([
-        'site:owasp.org/events India cybersecurity',
-        'site:owasp.org "Hyderabad" security',
-        'site:owasp.org "Bengaluru" security',
-        'site:owasp.org "Mumbai" security',
-        'site:owasp.org "Pune" security',
-        'site:owasp.org "Chennai" security',
-
-        'site:null.community India cybersecurity',
-        'site:securitybsides.com India',
-
-        'site:lu.ma cybersecurity India',
-        'site:meetup.com cybersecurity India',
-        'site:eventbrite.com cybersecurity India'
-    ])
-
-    # --------------------------------------------------------
-    # LOCATION SEARCHES
-    # --------------------------------------------------------
-
-    for location in INDIAN_LOCATIONS:
-
-        queries.extend([
-            f'"cybersecurity" event "{location}"',
-            f'"cyber security" meetup "{location}"',
-            f'"infosec" meetup "{location}"',
-            f'"cybersecurity conference" "{location}"',
-            f'"cybersecurity workshop" "{location}"',
-            f'"security meetup" "{location}"'
-        ])
-
-    # --------------------------------------------------------
-    # TOPIC SEARCHES
-    # --------------------------------------------------------
-
-    topics = [
-        "AppSec",
-        "Cloud Security",
-        "AI Security",
-        "SOC",
-        "DFIR",
-        "OSINT",
-        "Threat Intelligence",
-        "Digital Forensics",
-        "Incident Response",
-        "Penetration Testing",
-        "Ethical Hacking",
-        "Bug Bounty",
-        "VAPT",
-        "GRC",
-        "IAM",
-        "Network Security",
-        "CTF",
-        "Malware"
-    ]
-
-    for topic in topics:
-
-        queries.extend([
-            f'"{topic}" event India',
-            f'"{topic}" meetup India',
-            f'"{topic}" conference India'
-        ])
-
-    # Remove duplicate queries
-    return list(
-        dict.fromkeys(queries)
-    )
+def clean_html(text):
+    return re.sub(r"<[^>]+>", " ", text).strip()
 
 
-# ============================================================
-# EVENT KEYWORD FILTER
-# ============================================================
+def is_cybersecurity_event(title, snippet):
+    text = f"{title} {snippet}".lower()
+    text = clean_html(text)
 
-def is_possible_event(title, snippet):
-
-    text = (
-        f"{title} {snippet}"
-    ).lower()
-
-    # Cybersecurity signal
     cyber_signal = any(
         keyword.lower() in text
         for keyword in CYBERSECURITY_KEYWORDS
@@ -213,113 +118,88 @@ def is_possible_event(title, snippet):
     if not cyber_signal:
         return False
 
-    # Event signal
-    event_words = [
-        "event",
-        "meetup",
-        "conference",
-        "workshop",
-        "summit",
-        "webinar",
-        "ctf",
-        "hackathon",
-        "networking",
-        "seminar",
-        "community",
-        "session",
-        "talk"
-    ]
-
-    return any(
+    event_signal = any(
         word in text
-        for word in event_words
+        for word in EVENT_WORDS
     )
 
+    return event_signal
 
-# ============================================================
-# LOCATION DETECTION
-# ============================================================
 
 def detect_location(text):
-
     text_lower = text.lower()
 
-    for location in INDIAN_LOCATIONS:
-
-        if location.lower() in text_lower:
-
-            return location
-
-    # Common location aliases
     aliases = {
         "bangalore": "Bengaluru",
         "bengaluru": "Bengaluru",
         "bombay": "Mumbai",
+        "mumbai": "Mumbai",
         "calcutta": "Kolkata",
         "madras": "Chennai",
         "gurgaon": "Gurugram",
-        "new delhi": "Delhi"
+        "gurugram": "Gurugram",
+        "new delhi": "Delhi",
+        "delhi": "Delhi",
     }
 
     for alias, location in aliases.items():
-
         if alias in text_lower:
             return location
 
-    if "online" in text_lower:
+    for location in INDIAN_LOCATIONS:
+        if location.lower() in text_lower:
+            return location
+
+    online_words = [
+        "online",
+        "virtual",
+        "remote",
+        "webinar",
+        "online event",
+    ]
+
+    if any(word in text_lower for word in online_words):
         return "Online"
 
-    if "virtual" in text_lower:
-        return "Online"
+    india_words = [
+        "india",
+        "indian",
+        "india-based",
+    ]
 
-    return "India"
+    if any(word in text_lower for word in india_words):
+        return "India"
 
+    return "Unknown"
 
-# ============================================================
-# SOURCE DOMAIN
-# ============================================================
 
 def get_domain(url):
-
     try:
-
-        domain = urlparse(url).netloc
-
-        domain = domain.lower()
+        domain = urlparse(url).netloc.lower()
 
         if domain.startswith("www."):
             domain = domain[4:]
 
         return domain
-
     except Exception:
-
         return ""
 
 
-# ============================================================
-# SOURCE RELIABILITY
-# ============================================================
-
 def source_score(url):
-
     domain = get_domain(url)
 
     trusted_domains = {
-
         "owasp.org": 30,
         "null.community": 30,
         "securitybsides.com": 30,
-
         "meetup.com": 20,
         "eventbrite.com": 20,
         "lu.ma": 20,
-
-        "linkedin.com": 15
+        "github.com": 15,
+        "linkedin.com": 15,
     }
 
     for trusted_domain, score in trusted_domains.items():
-
         if domain == trusted_domain:
             return score
 
@@ -329,187 +209,110 @@ def source_score(url):
     return 5
 
 
-# ============================================================
-# EVENT CONFIDENCE
-# ============================================================
-
-def calculate_initial_score(event):
-
+def calculate_score(event):
     score = 40
 
-    score += source_score(
-        event["url"]
-    )
+    score += source_score(event["url"])
 
-    if event["location"] != "India":
+    if event["location"] != "Unknown":
         score += 5
 
     if event["location"] == "Online":
         score += 5
 
-    if len(event["title"]) > 10:
+    if len(event["title"]) >= 20:
         score += 5
 
-    if len(event["snippet"]) > 50:
+    if len(event["snippet"]) >= 100:
         score += 5
 
     return min(score, 100)
 
 
-# ============================================================
-# DISCOVERY
-# ============================================================
-
 def discover_events():
-
-    queries = generate_queries()
-
-    print(
-        f"🔎 Generated {len(queries)} search queries"
-    )
+    print("========================================")
+    print("🇮🇳 INDIA CYBERSECURITY EVENT DISCOVERY")
+    print("========================================")
+    print()
 
     discovered = []
 
-    # Initial free scan limit
-    # We will increase this after testing.
-    scan_queries = queries[:40]
+    print(f"🔎 Running {len(RSS_SEARCHES)} RSS searches")
+    print()
 
-    for index, query in enumerate(
-        scan_queries,
-        start=1
-    ):
+    for index, query in enumerate(RSS_SEARCHES, start=1):
 
-        print()
-        print(
-            f"[{index}/{len(scan_queries)}] "
-            f"Searching:"
-        )
+        print(f"[{index}/{len(RSS_SEARCHES)}] Searching:")
+        print(f"   {query}")
 
-        print(query)
+        results = search_google_news(query)
 
-        results = search_web(query)
-
-        print(
-            f"   Results: {len(results)}"
-        )
+        print(f"   Results: {len(results)}")
 
         for result in results:
 
             title = result["title"]
+            snippet = clean_html(result["snippet"])
 
-            snippet = result["snippet"]
-
-            if not is_possible_event(
-                title,
-                snippet
-            ):
+            if not is_cybersecurity_event(title, snippet):
                 continue
 
-            combined_text = (
-                f"{title} {snippet}"
-            )
+            combined_text = f"{title} {snippet}"
 
-            location = detect_location(
-                combined_text
-            )
+            location = detect_location(combined_text)
+
+            # Ignore clearly non-India results.
+            if location == "Unknown":
+                continue
 
             event = {
                 "title": title,
                 "url": result["url"],
                 "snippet": snippet,
+                "published": result["published"],
                 "location": location,
-                "source": get_domain(
-                    result["url"]
-                ),
-                "search_query": query
+                "source": get_domain(result["url"]),
             }
 
-            event["confidence"] = (
-                calculate_initial_score(
-                    event
-                )
-            )
+            event["confidence"] = calculate_score(event)
 
             discovered.append(event)
 
-    # ========================================================
-    # DEDUPLICATION
-    # ========================================================
-
+    # Deduplicate URLs.
     unique_events = {}
 
     for event in discovered:
 
-        url = event["url"].split("#")[0]
+        url = event["url"].split("#")[0].rstrip("/")
 
         if url not in unique_events:
-
             unique_events[url] = event
 
-    events = list(
-        unique_events.values()
-    )
+    events = list(unique_events.values())
 
-    # ========================================================
-    # SORT BY CONFIDENCE
-    # ========================================================
-
+    # Sort highest confidence first.
     events.sort(
-        key=lambda x: x["confidence"],
+        key=lambda event: event["confidence"],
         reverse=True
     )
 
-    # ========================================================
-    # OUTPUT
-    # ========================================================
-
     print()
-    print(
-        "========================================"
-    )
+    print("========================================")
+    print(f"🔎 DISCOVERED EVENTS: {len(events)}")
+    print("========================================")
 
-    print(
-        f"🔎 DISCOVERED EVENTS: {len(events)}"
-    )
-
-    print(
-        "========================================"
-    )
-
-    for number, event in enumerate(
-        events,
-        start=1
-    ):
+    for number, event in enumerate(events, start=1):
 
         print()
-        print(
-            f"{number}. {event['title']}"
-        )
-
-        print(
-            f"   📍 {event['location']}"
-        )
-
-        print(
-            f"   ⭐ Confidence: "
-            f"{event['confidence']}/100"
-        )
-
-        print(
-            f"   🌐 {event['source']}"
-        )
-
-        print(
-            f"   🔗 {event['url']}"
-        )
+        print(f"{number}. {event['title']}")
+        print(f"   📍 Location: {event['location']}")
+        print(f"   ⭐ Confidence: {event['confidence']}/100")
+        print(f"   🌐 Source: {event['source']}")
+        print(f"   📅 Published: {event['published']}")
+        print(f"   🔗 {event['url']}")
 
     return events
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 if __name__ == "__main__":
-
     discover_events()
