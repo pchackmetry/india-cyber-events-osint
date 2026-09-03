@@ -2,6 +2,38 @@ from __future__ import annotations
 
 from collectors import collect_candidates
 from verifier import verify_event, verification_score
+from telegram import send_telegram
+
+
+def build_telegram_message(verified: list[dict]) -> str:
+    """
+    Build a Telegram message containing verified cybersecurity events.
+    """
+
+    message = (
+        "🇮🇳 CYBERSECURITY EVENTS\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    for number, event in enumerate(
+        verified,
+        start=1,
+    ):
+        message += (
+            f"🔐 {number}. {event['title']}\n\n"
+            f"🌐 Source: {event['source']}\n"
+            f"✅ Verification: "
+            f"{event['verification_score']}/100\n"
+            f"📝 Registration signal: "
+            f"{event['has_registration']}\n"
+            f"📅 Date signal: "
+            f"{event['has_date']}\n"
+            f"📍 Location signal: "
+            f"{event['has_location']}\n"
+            f"🔗 {event['url']}\n\n"
+        )
+
+    return message
 
 
 def run_pipeline():
@@ -9,28 +41,56 @@ def run_pipeline():
     print("🇮🇳 INDIA CYBERSECURITY EVENT PIPELINE")
     print("=" * 60)
 
+    # --------------------------------------------------------
+    # COLLECT
+    # --------------------------------------------------------
+
     candidates = collect_candidates()
 
     print()
-    print(f"📦 Candidates collected: {len(candidates)}")
+    print(
+        f"📦 Candidates collected: "
+        f"{len(candidates)}"
+    )
+
+    # --------------------------------------------------------
+    # VERIFY
+    # --------------------------------------------------------
 
     verified = []
 
-    for number, candidate in enumerate(candidates, start=1):
+    for number, candidate in enumerate(
+        candidates,
+        start=1,
+    ):
         print()
-        print(f"[{number}/{len(candidates)}]")
+        print(
+            f"[{number}/{len(candidates)}]"
+        )
 
-        result = verify_event(candidate.url)
+        print(
+            f"   🔎 {candidate.title}"
+        )
 
-        score = verification_score(result)
+        result = verify_event(
+            candidate.url
+        )
+
+        score = verification_score(
+            result
+        )
 
         if not result.reachable:
-            print("   ❌ Rejected: page unreachable")
+            print(
+                "   ❌ Rejected: "
+                "page unreachable"
+            )
             continue
 
         if score < 40:
             print(
-                f"   ⚠️ Low verification score: {score}/100"
+                f"   ⚠️ Low verification score: "
+                f"{score}/100"
             )
             continue
 
@@ -54,15 +114,26 @@ def run_pipeline():
             }
         )
 
+    # --------------------------------------------------------
+    # SORT BY VERIFICATION SCORE
+    # --------------------------------------------------------
+
     verified.sort(
-        key=lambda event: event["verification_score"],
+        key=lambda event: event[
+            "verification_score"
+        ],
         reverse=True,
     )
+
+    # --------------------------------------------------------
+    # PRINT RESULTS
+    # --------------------------------------------------------
 
     print()
     print("=" * 60)
     print(
-        f"✅ VERIFIED EVENTS: {len(verified)}"
+        f"✅ VERIFIED EVENTS: "
+        f"{len(verified)}"
     )
     print("=" * 60)
 
@@ -72,10 +143,12 @@ def run_pipeline():
     ):
         print()
         print(
-            f"{number}. {event['title']}"
+            f"{number}. "
+            f"{event['title']}"
         )
         print(
-            f"   Source: {event['source']}"
+            f"   Source: "
+            f"{event['source']}"
         )
         print(
             f"   Verification: "
@@ -94,7 +167,39 @@ def run_pipeline():
             f"{event['has_location']}"
         )
         print(
-            f"   URL: {event['url']}"
+            f"   URL: "
+            f"{event['url']}"
+        )
+
+    # --------------------------------------------------------
+    # TELEGRAM ALERT
+    # --------------------------------------------------------
+
+    if verified:
+
+        print()
+        print("=" * 60)
+        print("📨 SENDING TELEGRAM ALERT")
+        print("=" * 60)
+
+        telegram_message = (
+            build_telegram_message(
+                verified
+            )
+        )
+
+        send_telegram(
+            telegram_message
+        )
+
+    else:
+
+        print()
+        print(
+            "ℹ️ No verified events found."
+        )
+        print(
+            "ℹ️ No Telegram alert sent."
         )
 
     return verified
