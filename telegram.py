@@ -5,6 +5,7 @@ import requests
 
 
 TELEGRAM_API = "https://api.telegram.org"
+MAX_MESSAGE_LENGTH = 4000
 
 
 def send_telegram(message: str) -> bool:
@@ -21,30 +22,87 @@ def send_telegram(message: str) -> bool:
 
     url = f"{TELEGRAM_API}/bot{bot_token}/sendMessage"
 
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "disable_web_page_preview": False,
-    }
+    # Split long messages into safe Telegram-sized chunks.
+    chunks = []
 
-    try:
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=20,
+    while len(message) > MAX_MESSAGE_LENGTH:
+
+        split_at = message.rfind(
+            "\n\n",
+            0,
+            MAX_MESSAGE_LENGTH,
         )
 
-        if response.ok:
-            print("✅ Telegram alert sent")
-            return True
+        if split_at == -1:
+            split_at = message.rfind(
+                "\n",
+                0,
+                MAX_MESSAGE_LENGTH,
+            )
 
-        print(
-            f"❌ Telegram error: "
-            f"{response.status_code} "
-            f"{response.text}"
+        if split_at == -1:
+            split_at = MAX_MESSAGE_LENGTH
+
+        chunks.append(
+            message[:split_at]
         )
-        return False
 
-    except requests.RequestException as exc:
-        print(f"❌ Telegram request failed: {exc}")
-        return False
+        message = message[split_at:].lstrip()
+
+    if message:
+        chunks.append(message)
+
+    print(
+        f"📨 Telegram messages to send: "
+        f"{len(chunks)}"
+    )
+
+    success = True
+
+    for number, chunk in enumerate(
+        chunks,
+        start=1,
+    ):
+
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "disable_web_page_preview": False,
+        }
+
+        try:
+
+            response = requests.post(
+                url,
+                json=payload,
+                timeout=20,
+            )
+
+            if response.ok:
+
+                print(
+                    f"✅ Telegram message "
+                    f"{number}/{len(chunks)} sent"
+                )
+
+            else:
+
+                print(
+                    f"❌ Telegram message "
+                    f"{number}/{len(chunks)} failed: "
+                    f"{response.status_code} "
+                    f"{response.text}"
+                )
+
+                success = False
+
+        except requests.RequestException as exc:
+
+            print(
+                f"❌ Telegram request failed: "
+                f"{exc}"
+            )
+
+            success = False
+
+    return success
