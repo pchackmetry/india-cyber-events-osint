@@ -2,38 +2,7 @@ from __future__ import annotations
 
 from collectors import collect_candidates
 from verifier import verify_event, verification_score
-from telegram import send_telegram
-
-
-def build_telegram_message(verified: list[dict]) -> str:
-    """
-    Build a Telegram message containing verified cybersecurity events.
-    """
-
-    message = (
-        "🇮🇳 CYBERSECURITY EVENTS\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-    )
-
-    for number, event in enumerate(
-        verified,
-        start=1,
-    ):
-        message += (
-            f"🔐 {number}. {event['title']}\n\n"
-            f"🌐 Source: {event['source']}\n"
-            f"✅ Verification: "
-            f"{event['verification_score']}/100\n"
-            f"📝 Registration signal: "
-            f"{event['has_registration']}\n"
-            f"📅 Date signal: "
-            f"{event['has_date']}\n"
-            f"📍 Location signal: "
-            f"{event['has_location']}\n"
-            f"🔗 {event['url']}\n\n"
-        )
-
-    return message
+from telegram import send_event_alert
 
 
 def run_pipeline():
@@ -80,6 +49,10 @@ def run_pipeline():
             result
         )
 
+        # ----------------------------------------------------
+        # Reject unreachable pages
+        # ----------------------------------------------------
+
         if not result.reachable:
             print(
                 "   ❌ Rejected: "
@@ -87,12 +60,20 @@ def run_pipeline():
             )
             continue
 
+        # ----------------------------------------------------
+        # Reject low verification scores
+        # ----------------------------------------------------
+
         if score < 40:
             print(
                 f"   ⚠️ Low verification score: "
                 f"{score}/100"
             )
             continue
+
+        # ----------------------------------------------------
+        # Store verified event
+        # ----------------------------------------------------
 
         verified.append(
             {
@@ -102,14 +83,33 @@ def run_pipeline():
                 "description": candidate.description,
                 "verification_score": score,
                 "page_title": result.title,
+
                 "has_registration": (
                     result.has_registration_signal
                 ),
+
                 "has_date": (
                     result.has_date_signal
                 ),
+
+                "has_future_date": (
+                    result.has_future_date
+                ),
+
                 "has_location": (
                     result.has_location_signal
+                ),
+
+                "has_india_location": (
+                    result.has_india_location
+                ),
+
+                "has_online_signal": (
+                    result.has_online_signal
+                ),
+
+                "detected_dates": (
+                    result.detected_dates
                 ),
             }
         )
@@ -126,7 +126,7 @@ def run_pipeline():
     )
 
     # --------------------------------------------------------
-    # PRINT RESULTS
+    # PRINT VERIFIED EVENTS
     # --------------------------------------------------------
 
     print()
@@ -142,79 +142,111 @@ def run_pipeline():
         start=1,
     ):
         print()
+
         print(
             f"{number}. "
             f"{event['title']}"
         )
+
         print(
             f"   Source: "
             f"{event['source']}"
         )
+
         print(
             f"   Verification: "
             f"{event['verification_score']}/100"
         )
+
         print(
             f"   Registration: "
             f"{event['has_registration']}"
         )
+
         print(
             f"   Date signal: "
             f"{event['has_date']}"
         )
+
+        print(
+            f"   Future date: "
+            f"{event['has_future_date']}"
+        )
+
         print(
             f"   Location signal: "
             f"{event['has_location']}"
         )
+
+        print(
+            f"   India location: "
+            f"{event['has_india_location']}"
+        )
+
+        print(
+            f"   Online signal: "
+            f"{event['has_online_signal']}"
+        )
+
+        print(
+            f"   Detected dates: "
+            f"{event['detected_dates']}"
+        )
+
         print(
             f"   URL: "
             f"{event['url']}"
         )
 
     # --------------------------------------------------------
-    # TELEGRAM ALERT
+    # TELEGRAM ALERTS
     # --------------------------------------------------------
 
     if verified:
 
-    print()
-    print("=" * 60)
-    print("📨 SENDING INDIVIDUAL TELEGRAM ALERTS")
-    print("=" * 60)
+        print()
+        print("=" * 60)
+        print(
+            "📨 SENDING INDIVIDUAL TELEGRAM ALERTS"
+        )
+        print("=" * 60)
 
-    for number, event in enumerate(
-        verified,
-        start=1,
-    ):
+        successful_alerts = 0
+
+        for number, event in enumerate(
+            verified,
+            start=1,
+        ):
+
+            print()
+            print(
+                f"📨 Sending event "
+                f"{number}/{len(verified)}"
+            )
+
+            success = send_event_alert(
+                event
+            )
+
+            if success:
+                successful_alerts += 1
 
         print()
         print(
-            f"📨 Sending event "
-            f"{number}/{len(verified)}"
+            f"📨 Telegram alerts sent: "
+            f"{successful_alerts}/"
+            f"{len(verified)}"
         )
 
-        from telegram import send_event_alert
-
-        send_event_alert(event)
-
-else:
-
-    print()
-    print(
-        "ℹ️ No verified events found."
-    )
-
-    print(
-        "ℹ️ No Telegram alerts sent."
-    )
     else:
 
         print()
         print(
             "ℹ️ No verified events found."
         )
+
         print(
-            "ℹ️ No Telegram alert sent."
+            "ℹ️ No Telegram alerts sent."
         )
 
     return verified
