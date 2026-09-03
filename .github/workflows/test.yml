@@ -1,10 +1,10 @@
-name: Telegram Bot Test
+name: India Cybersecurity OSINT Scanner
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,8 +19,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Test Telegram bot
+      - name: Run OSINT discovery
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot_test.py
+        run: python discovery.py
