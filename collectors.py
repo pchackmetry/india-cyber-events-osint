@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import requests
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
@@ -5,8 +7,11 @@ from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 Chrome/140.0 Safari/537.36"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0 Safari/537.36"
+    )
 }
 
 TIMEOUT = 20
@@ -17,9 +22,13 @@ class Candidate:
     title: str
     url: str
     source: str
+    description: str = ""
 
 
-# Direct public event/community sources.
+# ============================================================
+# DIRECT PUBLIC SOURCES
+# ============================================================
+
 SOURCES = [
     {
         "name": "OWASP Events",
@@ -36,10 +45,14 @@ SOURCES = [
 ]
 
 
+# ============================================================
+# RELEVANCE KEYWORDS
+# ============================================================
+
 CYBER_KEYWORDS = [
     "cyber",
-    "security",
     "cybersecurity",
+    "cyber security",
     "information security",
     "infosec",
     "application security",
@@ -64,6 +77,7 @@ CYBER_KEYWORDS = [
     "red team",
     "grc",
     "iam",
+    "identity security",
     "ctf",
     "capture the flag",
     "hackathon",
@@ -111,7 +125,11 @@ INDIA_LOCATIONS = [
 ]
 
 
-def fetch_page(url):
+# ============================================================
+# FETCH PAGE
+# ============================================================
+
+def fetch_page(url: str) -> str | None:
     try:
         response = requests.get(
             url,
@@ -119,122 +137,273 @@ def fetch_page(url):
             timeout=TIMEOUT,
         )
 
+        print(
+            f"   HTTP {response.status_code} | "
+            f"{len(response.content)} bytes"
+        )
+
         if response.status_code != 200:
-            print(f"   HTTP {response.status_code}")
             return None
 
         return response.text
 
-    except Exception as e:
-        print(f"   ERROR: {e}")
+    except requests.RequestException as exc:
+        print(f"   ❌ Request error: {exc}")
+        return None
+
+    except Exception as exc:
+        print(f"   ❌ Unexpected error: {exc}")
         return None
 
 
-def is_relevant(title, url):
+# ============================================================
+# RELEVANCE CHECK
+# ============================================================
+
+def is_relevant(title: str, url: str) -> bool:
     text = f"{title} {url}".lower()
 
-    has_cyber = any(
+    has_cyber_keyword = any(
         keyword in text
         for keyword in CYBER_KEYWORDS
     )
 
-    has_event = any(
+    has_event_keyword = any(
         keyword in text
         for keyword in EVENT_KEYWORDS
     )
 
-    return has_cyber and has_event
+    return (
+        has_cyber_keyword
+        and has_event_keyword
+    )
 
 
-def extract_links(html, base_url, source_name):
-    soup = BeautifulSoup(html, "lxml")
+# ============================================================
+# INDIA / ONLINE LOCATION CHECK
+# ============================================================
 
-    candidates = []
+def has_india_location(title: str, url: str) -> bool:
+    text = f"{title} {url}".lower()
 
-    for link in soup.find_all("a", href=True):
+    return any(
+        location in text
+        for location in INDIA_LOCATIONS
+    ) or "online" in text
 
-        title = link.get_text(" ", strip=True)
-        href = link.get("href", "").strip()
+
+# ============================================================
+# EXTRACT LINKS
+# ============================================================
+
+def extract_links(
+    html: str,
+    base_url: str,
+    source_name: str,
+) -> list[Candidate]:
+
+    soup = BeautifulSoup(
+        html,
+        "lxml",
+    )
+
+    candidates: list[Candidate] = []
+
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
+
+        title = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        href = link.get(
+            "href",
+            "",
+        ).strip()
 
         if not title or not href:
             continue
 
-        url = urljoin(base_url, href)
+        url = urljoin(
+            base_url,
+            href,
+        )
 
-        if not url.startswith("http"):
+        if not url.startswith(
+            "http"
+        ):
             continue
 
-        if not is_relevant(title, url):
+        if not is_relevant(
+            title,
+            url,
+        ):
             continue
+
+        # Keep India/online events when
+        # the information is visible in the link.
+        location_match = has_india_location(
+            title,
+            url,
+        )
+
+        description = (
+            "India/Online location signal detected."
+            if location_match
+            else ""
+        )
 
         candidates.append(
             Candidate(
                 title=title,
                 url=url,
                 source=source_name,
+                description=description,
             )
         )
 
     return candidates
 
 
-def collect_from_source(source):
-    print()
-    print(f"🌐 SOURCE: {source['name']}")
-    print(f"   URL: {source['url']}")
+# ============================================================
+# COLLECT FROM ONE SOURCE
+# ============================================================
 
-    html = fetch_page(source["url"])
+def collect_from_source(
+    source: dict,
+) -> list[Candidate]:
+
+    print()
+    print("=" * 60)
+    print(
+        f"🌐 SOURCE: {source['name']}"
+    )
+    print(
+        f"   URL: {source['url']}"
+    )
+
+    html = fetch_page(
+        source["url"]
+    )
 
     if not html:
-        print("   ❌ Could not access source")
+        print(
+            "   ❌ Source unavailable"
+        )
         return []
 
     candidates = extract_links(
-        html,
-        source["url"],
-        source["name"],
+        html=html,
+        base_url=source["url"],
+        source_name=source["name"],
     )
 
-    print(f"   Candidates found: {len(candidates)}")
+    print(
+        f"   Candidates found: "
+        f"{len(candidates)}"
+    )
 
     return candidates
 
 
-def collect_candidates():
+# ============================================================
+# MAIN COLLECTION
+# ============================================================
+
+def collect_candidates() -> list[Candidate]:
+
     print("=" * 60)
-    print("🔎 DIRECT EVENT SOURCE COLLECTION")
+    print(
+        "🔎 DIRECT EVENT SOURCE COLLECTION"
+    )
     print("=" * 60)
 
-    all_candidates = []
+    all_candidates: list[Candidate] = []
 
     for source in SOURCES:
-        candidates = collect_from_source(source)
-        all_candidates.extend(candidates)
 
-    # Deduplicate URLs
-    unique = {}
+        candidates = collect_from_source(
+            source
+        )
+
+        all_candidates.extend(
+            candidates
+        )
+
+    # --------------------------------------------------------
+    # Deduplicate by normalized URL
+    # --------------------------------------------------------
+
+    unique_candidates: dict[
+        str,
+        Candidate
+    ] = {}
 
     for candidate in all_candidates:
-        normalized = candidate.url.rstrip("/")
 
-        if normalized not in unique:
-            unique[normalized] = candidate
+        normalized_url = (
+            candidate.url
+            .strip()
+            .rstrip("/")
+        )
 
-    candidates = list(unique.values())
+        if normalized_url not in unique_candidates:
+            unique_candidates[
+                normalized_url
+            ] = candidate
+
+    candidates = list(
+        unique_candidates.values()
+    )
+
+    # --------------------------------------------------------
+    # Final output
+    # --------------------------------------------------------
 
     print()
     print("=" * 60)
-    print(f"✅ UNIQUE CANDIDATES: {len(candidates)}")
+    print(
+        f"✅ UNIQUE CANDIDATES: "
+        f"{len(candidates)}"
+    )
     print("=" * 60)
 
-    for index, candidate in enumerate(candidates, start=1):
+    for number, candidate in enumerate(
+        candidates,
+        start=1,
+    ):
+
         print()
-        print(f"[{index}] {candidate.title}")
-        print(f"    Source: {candidate.source}")
-        print(f"    URL: {candidate.url}")
+        print(
+            f"[{number}] "
+            f"{candidate.title}"
+        )
+
+        print(
+            f"    Source: "
+            f"{candidate.source}"
+        )
+
+        print(
+            f"    URL: "
+            f"{candidate.url}"
+        )
+
+        if candidate.description:
+            print(
+                f"    Description: "
+                f"{candidate.description}"
+            )
 
     return candidates
 
+
+# ============================================================
+# LOCAL TEST
+# ============================================================
 
 if __name__ == "__main__":
     collect_candidates()
