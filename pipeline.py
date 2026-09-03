@@ -177,21 +177,36 @@ def run_pipeline():
 
     if verified:
 
+    print()
+    print("=" * 60)
+    print("📨 SENDING INDIVIDUAL TELEGRAM ALERTS")
+    print("=" * 60)
+
+    for number, event in enumerate(
+        verified,
+        start=1,
+    ):
+
         print()
-        print("=" * 60)
-        print("📨 SENDING TELEGRAM ALERT")
-        print("=" * 60)
-
-        telegram_message = (
-            build_telegram_message(
-                verified
-            )
+        print(
+            f"📨 Sending event "
+            f"{number}/{len(verified)}"
         )
 
-        send_telegram(
-            telegram_message
-        )
+        from telegram import send_event_alert
 
+        send_event_alert(event)
+
+else:
+
+    print()
+    print(
+        "ℹ️ No verified events found."
+    )
+
+    print(
+        "ℹ️ No Telegram alerts sent."
+    )
     else:
 
         print()
