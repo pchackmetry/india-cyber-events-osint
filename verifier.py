@@ -1,333 +1,628 @@
-"""
-Event verification layer.
-
-Checks whether discovered event URLs are reachable and extracts
-basic evidence from the actual event page.
-
-This is intentionally separate from discovery so it can be upgraded
-later with:
-- date extraction
-- venue extraction
-- registration detection
-- cancellation detection
-- organizer verification
-- cross-source verification
-"""
-
 from __future__ import annotations
 
 import re
+import requests
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlparse
-
-import requests
 from bs4 import BeautifulSoup
 
-
-TIMEOUT = 20
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0 Safari/537.36"
     )
 }
 
-SESSION = requests.Session()
-SESSION.headers.update(HEADERS)
+TIMEOUT = 20
 
+
+# ============================================================
+# KEYWORDS
+# ============================================================
+
+CYBER_KEYWORDS = [
+    "cybersecurity",
+    "cyber security",
+    "information security",
+    "infosec",
+    "application security",
+    "appsec",
+    "cloud security",
+    "ai security",
+    "network security",
+    "penetration testing",
+    "pentesting",
+    "ethical hacking",
+    "vapt",
+    "vulnerability",
+    "bug bounty",
+    "digital forensics",
+    "dfir",
+    "incident response",
+    "threat intelligence",
+    "malware",
+    "osint",
+    "soc",
+    "blue team",
+    "red team",
+    "grc",
+    "iam",
+    "identity security",
+    "ctf",
+    "capture the flag",
+    "security operations",
+]
+
+
+EVENT_KEYWORDS = [
+    "event",
+    "meetup",
+    "conference",
+    "workshop",
+    "webinar",
+    "summit",
+    "training",
+    "seminar",
+    "networking",
+    "community",
+    "ctf",
+    "hackathon",
+]
+
+
+INDIA_LOCATIONS = [
+    "india",
+    "hyderabad",
+    "bengaluru",
+    "bangalore",
+    "mumbai",
+    "pune",
+    "chennai",
+    "delhi",
+    "gurugram",
+    "gurgaon",
+    "noida",
+    "kolkata",
+    "kochi",
+    "ahmedabad",
+    "jaipur",
+    "chandigarh",
+    "bhubaneswar",
+    "lucknow",
+    "indore",
+    "coimbatore",
+    "visakhapatnam",
+]
+
+
+ONLINE_KEYWORDS = [
+    "online",
+    "virtual",
+    "remote",
+    "zoom",
+    "webinar",
+    "virtual event",
+]
+
+
+REGISTRATION_KEYWORDS = [
+    "register",
+    "registration",
+    "rsvp",
+    "tickets",
+    "book now",
+    "sign up",
+    "join event",
+    "attend",
+    "reserve",
+]
+
+
+# ============================================================
+# VERIFICATION RESULT
+# ============================================================
 
 @dataclass
 class VerificationResult:
-    url: str
     reachable: bool
-    status_code: int
     title: str
     text: str
+
     has_registration_signal: bool
     has_date_signal: bool
+    has_future_date: bool
     has_location_signal: bool
-    verified_at: str
+    has_india_location: bool
+    has_online_signal: bool
+    has_cyber_signal: bool
+    has_event_signal: bool
+
+    detected_dates: list[str]
 
 
-def clean_text(text: str) -> str:
-    """Normalize webpage text."""
+# ============================================================
+# FETCH PAGE
+# ============================================================
 
-    text = re.sub(r"\s+", " ", text or "")
-
-    return text.strip()
-
-
-def fetch_page(url: str) -> tuple[str, int]:
-    """Fetch an event page."""
+def fetch_page(url: str) -> str | None:
 
     try:
-        response = SESSION.get(
+        response = requests.get(
             url,
+            headers=HEADERS,
             timeout=TIMEOUT,
             allow_redirects=True,
         )
 
-        return response.text, response.status_code
+        if response.status_code != 200:
+            print(
+                f"   ❌ HTTP {response.status_code}"
+            )
+            return None
 
-    except requests.RequestException as error:
+        if not response.text:
+            print("   ❌ Empty page")
+            return None
+
+        return response.text
+
+    except requests.RequestException as exc:
         print(
-            f"   ⚠️ Verification failed: "
-            f"{url}"
+            f"   ❌ Request error: {exc}"
         )
+        return None
+
+    except Exception as exc:
         print(
-            f"      {error}"
+            f"   ❌ Unexpected error: {exc}"
         )
+        return None
 
-        return "", 0
 
+# ============================================================
+# EXTRACT PAGE CONTENT
+# ============================================================
 
-def extract_page_text(
+def extract_page_content(
     html: str,
 ) -> tuple[str, str]:
 
-    if not html:
-        return "", ""
-
     soup = BeautifulSoup(
         html,
-        "html.parser",
+        "lxml",
     )
 
-    # Remove elements that don't provide useful event evidence.
+    # Remove unnecessary elements.
     for element in soup(
-        ["script", "style", "noscript"]
+        [
+            "script",
+            "style",
+            "noscript",
+            "svg",
+        ]
     ):
         element.decompose()
 
     title = ""
 
     if soup.title:
-        title = clean_text(
-            soup.title.get_text(
-                " ",
-                strip=True,
-            )
-        )
-
-    text = clean_text(
-        soup.get_text(
+        title = soup.title.get_text(
             " ",
             strip=True,
         )
+
+    text = soup.get_text(
+        " ",
+        strip=True,
+    )
+
+    # Normalize whitespace.
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
     )
 
     return title, text
 
 
-def contains_registration_signal(
-    text: str,
-) -> bool:
+# ============================================================
+# KEYWORD CHECK
+# ============================================================
 
-    patterns = [
-        "register",
-        "registration",
-        "rsvp",
-        "book now",
-        "tickets",
-        "reserve your spot",
-        "sign up",
-        "join us",
-    ]
+def contains_keyword(
+    text: str,
+    keywords: list[str],
+) -> bool:
 
     text_lower = text.lower()
 
     return any(
-        pattern in text_lower
-        for pattern in patterns
+        keyword in text_lower
+        for keyword in keywords
     )
 
 
-def contains_date_signal(
+# ============================================================
+# DATE EXTRACTION
+# ============================================================
+
+def extract_dates(
     text: str,
-) -> bool:
+) -> list[str]:
 
     patterns = [
+        # 3 September 2026
         r"\b\d{1,2}\s+"
-        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
-        r"[a-z]*\s+\d{4}\b",
+        r"(?:January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)"
+        r"\s+\d{4}\b",
 
-        r"\b"
-        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
-        r"[a-z]*\s+\d{1,2}"
-        r"(?:,\s*|\s+)\d{4}\b",
+        # September 3, 2026
+        r"\b(?:January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)"
+        r"\s+\d{1,2},\s+\d{4}\b",
 
-        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+        # 03/09/2026 or 03-09-2026
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b",
 
-        r"\b20\d{2}\b",
+        # 2026-09-03
+        r"\b\d{4}-\d{2}-\d{2}\b",
+
+        # Sep 3 2026
+        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        r"[a-z]*\s+\d{1,2},?\s+\d{4}\b",
     ]
+
+    matches = []
+
+    for pattern in patterns:
+
+        found = re.findall(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        matches.extend(found)
+
+    # Remove duplicates.
+    unique = []
+
+    for date_text in matches:
+
+        if date_text not in unique:
+            unique.append(date_text)
+
+    return unique
+
+
+# ============================================================
+# PARSE DATE
+# ============================================================
+
+def parse_date(
+    date_text: str,
+) -> datetime | None:
+
+    formats = [
+        "%d %B %Y",
+        "%B %d, %Y",
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%Y-%m-%d",
+        "%b %d %Y",
+        "%b %d, %Y",
+    ]
+
+    for fmt in formats:
+
+        try:
+            parsed = datetime.strptime(
+                date_text,
+                fmt,
+            )
+
+            return parsed.replace(
+                tzinfo=timezone.utc
+            )
+
+        except ValueError:
+            continue
+
+    return None
+
+
+# ============================================================
+# FUTURE DATE CHECK
+# ============================================================
+
+def has_future_date(
+    detected_dates: list[str],
+) -> bool:
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    for date_text in detected_dates:
+
+        parsed = parse_date(
+            date_text
+        )
+
+        if parsed and parsed.date() >= now.date():
+            return True
+
+    return False
+
+
+# ============================================================
+# LOCATION CHECK
+# ============================================================
+
+def location_signals(
+    text: str,
+) -> tuple[bool, bool, bool]:
 
     text_lower = text.lower()
 
-    return any(
-        re.search(
-            pattern,
-            text_lower,
-        )
-        for pattern in patterns
+    has_india = any(
+        location in text_lower
+        for location in INDIA_LOCATIONS
+    )
+
+    has_online = any(
+        keyword in text_lower
+        for keyword in ONLINE_KEYWORDS
+    )
+
+    return (
+        has_india or has_online,
+        has_india,
+        has_online,
     )
 
 
-def contains_location_signal(
+# ============================================================
+# REGISTRATION CHECK
+# ============================================================
+
+def registration_signal(
+    soup: BeautifulSoup,
     text: str,
 ) -> bool:
 
-    locations = [
-        "hyderabad",
-        "bengaluru",
-        "bangalore",
-        "mumbai",
-        "pune",
-        "chennai",
-        "delhi",
-        "noida",
-        "gurugram",
-        "gurgaon",
-        "kolkata",
-        "kochi",
-        "ahmedabad",
-        "jaipur",
-        "chandigarh",
-        "bhubaneswar",
-        "lucknow",
-        "indore",
-        "coimbatore",
-        "visakhapatnam",
-        "india",
-        "online",
-        "virtual",
-    ]
-
     text_lower = text.lower()
 
-    return any(
-        location in text_lower
-        for location in locations
-    )
+    if any(
+        keyword in text_lower
+        for keyword in REGISTRATION_KEYWORDS
+    ):
+        return True
 
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
+
+        link_text = link.get_text(
+            " ",
+            strip=True,
+        ).lower()
+
+        href = link.get(
+            "href",
+            "",
+        ).lower()
+
+        combined = (
+            f"{link_text} {href}"
+        )
+
+        if any(
+            keyword in combined
+            for keyword in REGISTRATION_KEYWORDS
+        ):
+            return True
+
+    return False
+
+
+# ============================================================
+# VERIFY EVENT
+# ============================================================
 
 def verify_event(
     url: str,
 ) -> VerificationResult:
 
-    print()
     print(
-        f"🔍 Verifying: {url}"
+        f"   🔎 Verifying: {url}"
     )
 
-    html, status_code = fetch_page(url)
+    html = fetch_page(url)
 
-    if not html or status_code < 200 or status_code >= 400:
-
-        print(
-            f"   ❌ Page unavailable "
-            f"(HTTP {status_code})"
-        )
+    if not html:
 
         return VerificationResult(
-            url=url,
             reachable=False,
-            status_code=status_code,
             title="",
             text="",
             has_registration_signal=False,
             has_date_signal=False,
+            has_future_date=False,
             has_location_signal=False,
-            verified_at=datetime.now(
-                timezone.utc
-            ).isoformat(),
+            has_india_location=False,
+            has_online_signal=False,
+            has_cyber_signal=False,
+            has_event_signal=False,
+            detected_dates=[],
         )
 
-    title, text = extract_page_text(
+    title, text = extract_page_content(
         html
     )
 
-    registration = contains_registration_signal(
+    soup = BeautifulSoup(
+        html,
+        "lxml",
+    )
+
+    detected_dates = extract_dates(
         text
     )
 
-    date_signal = contains_date_signal(
-        text
+    future_date = has_future_date(
+        detected_dates
     )
 
-    location_signal = contains_location_signal(
-        text
+    has_location, has_india, has_online = (
+        location_signals(text)
+    )
+
+    has_registration = (
+        registration_signal(
+            soup,
+            text,
+        )
+    )
+
+    has_cyber = contains_keyword(
+        f"{title} {text}",
+        CYBER_KEYWORDS,
+    )
+
+    has_event = contains_keyword(
+        f"{title} {text}",
+        EVENT_KEYWORDS,
+    )
+
+    result = VerificationResult(
+        reachable=True,
+        title=title,
+        text=text,
+        has_registration_signal=has_registration,
+        has_date_signal=bool(
+            detected_dates
+        ),
+        has_future_date=future_date,
+        has_location_signal=has_location,
+        has_india_location=has_india,
+        has_online_signal=has_online,
+        has_cyber_signal=has_cyber,
+        has_event_signal=has_event,
+        detected_dates=detected_dates,
     )
 
     print(
-        f"   ✅ HTTP {status_code}"
+        f"   Page title: {title}"
     )
 
     print(
-        f"   Title: {title[:120]}"
+        f"   Cyber signal: {has_cyber}"
     )
 
     print(
-        f"   Registration signal: "
-        f"{registration}"
+        f"   Event signal: {has_event}"
     )
 
     print(
         f"   Date signal: "
-        f"{date_signal}"
+        f"{bool(detected_dates)}"
     )
 
     print(
-        f"   Location signal: "
-        f"{location_signal}"
+        f"   Future date: "
+        f"{future_date}"
     )
 
-    return VerificationResult(
-        url=url,
-        reachable=True,
-        status_code=status_code,
-        title=title,
-        text=text,
-        has_registration_signal=registration,
-        has_date_signal=date_signal,
-        has_location_signal=location_signal,
-        verified_at=datetime.now(
-            timezone.utc
-        ).isoformat(),
+    print(
+        f"   India location: "
+        f"{has_india}"
     )
 
+    print(
+        f"   Online signal: "
+        f"{has_online}"
+    )
+
+    print(
+        f"   Registration: "
+        f"{has_registration}"
+    )
+
+    return result
+
+
+# ============================================================
+# VERIFICATION SCORE
+# ============================================================
 
 def verification_score(
     result: VerificationResult,
 ) -> int:
 
+    if not result.reachable:
+        return 0
+
     score = 0
 
-    if result.reachable:
-        score += 40
-
-    if result.has_date_signal:
-        score += 25
-
-    if result.has_location_signal:
+    # Cybersecurity relevance.
+    if result.has_cyber_signal:
         score += 20
 
+    # Event relevance.
+    if result.has_event_signal:
+        score += 15
+
+    # Actual date exists.
+    if result.has_date_signal:
+        score += 10
+
+    # Date is future.
+    if result.has_future_date:
+        score += 25
+
+    # India location or online.
+    if result.has_location_signal:
+        score += 15
+
+    # Registration.
     if result.has_registration_signal:
         score += 15
 
-    return min(score, 100)
+    return min(
+        score,
+        100,
+    )
 
+
+# ============================================================
+# TEST
+# ============================================================
 
 if __name__ == "__main__":
 
-    print(
-        "verifier.py is ready."
+    test_url = (
+        "https://owasp.org/events/"
     )
 
-    print(
-        "It will be connected to the discovery "
-        "pipeline in the next step."
+    result = verify_event(
+        test_url
     )
+
+    score = verification_score(
+        result
+    )
+
+    print()
+    print("=" * 60)
+    print(
+        f"VERIFICATION SCORE: "
+        f"{score}/100"
+    )
+    print("=" * 60)
