@@ -1,7 +1,7 @@
 import re
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from sources import INDIAN_LOCATIONS, CYBERSECURITY_KEYWORDS
 
@@ -9,16 +9,20 @@ from sources import INDIAN_LOCATIONS, CYBERSECURITY_KEYWORDS
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
     )
 }
 
 
-def search_duckduckgo(query):
-    """
-    Search DuckDuckGo's public HTML results.
+# ============================================================
+# SEARCH
+# ============================================================
 
-    No search API key is required.
+def search_web(query):
+    """
+    Search DuckDuckGo public HTML results.
+    No paid API required.
     """
 
     url = (
@@ -39,17 +43,26 @@ def search_duckduckgo(query):
         print(f"❌ Search failed: {error}")
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
 
     results = []
 
     for result in soup.select(".result"):
 
-        title_element = result.select_one(".result__title")
+        title_element = result.select_one(
+            ".result__title"
+        )
 
-        link_element = result.select_one(".result__a")
+        link_element = result.select_one(
+            ".result__a"
+        )
 
-        snippet_element = result.select_one(".result__snippet")
+        snippet_element = result.select_one(
+            ".result__snippet"
+        )
 
         if not title_element or not link_element:
             continue
@@ -59,7 +72,7 @@ def search_duckduckgo(query):
             strip=True
         )
 
-        link = link_element.get("href")
+        url = link_element.get("href")
 
         snippet = ""
 
@@ -69,73 +82,138 @@ def search_duckduckgo(query):
                 strip=True
             )
 
-        if link:
-            results.append({
-                "title": title,
-                "url": link,
-                "snippet": snippet
-            })
+        if not url:
+            continue
+
+        results.append({
+            "title": title,
+            "url": url,
+            "snippet": snippet
+        })
 
     return results
 
 
-def build_search_queries():
+# ============================================================
+# SEARCH QUERY GENERATOR
+# ============================================================
+
+def generate_queries():
 
     queries = []
 
-    # General India searches
+    # --------------------------------------------------------
+    # INDIA-WIDE SEARCHES
+    # --------------------------------------------------------
+
     queries.extend([
         '"cybersecurity" event India',
-        '"cyber security" meetup India',
+        '"cyber security" event India',
         '"information security" event India',
-        '"infosec" meetup India',
+        '"infosec" event India',
+        '"cybersecurity meetup" India',
+        '"cyber security meetup" India',
         '"cybersecurity conference" India',
         '"cybersecurity workshop" India',
         '"cybersecurity CTF" India',
-        '"security meetup" India'
+        '"security meetup" India',
+        '"security conference" India'
     ])
 
-    # Location-specific searches
+    # --------------------------------------------------------
+    # COMMUNITY SEARCHES
+    # --------------------------------------------------------
+
+    queries.extend([
+        'site:owasp.org/events India cybersecurity',
+        'site:owasp.org "Hyderabad" security',
+        'site:owasp.org "Bengaluru" security',
+        'site:owasp.org "Mumbai" security',
+        'site:owasp.org "Pune" security',
+        'site:owasp.org "Chennai" security',
+
+        'site:null.community India cybersecurity',
+        'site:securitybsides.com India',
+
+        'site:lu.ma cybersecurity India',
+        'site:meetup.com cybersecurity India',
+        'site:eventbrite.com cybersecurity India'
+    ])
+
+    # --------------------------------------------------------
+    # LOCATION SEARCHES
+    # --------------------------------------------------------
+
     for location in INDIAN_LOCATIONS:
 
         queries.extend([
             f'"cybersecurity" event "{location}"',
             f'"cyber security" meetup "{location}"',
             f'"infosec" meetup "{location}"',
-            f'"cybersecurity conference" "{location}"'
+            f'"cybersecurity conference" "{location}"',
+            f'"cybersecurity workshop" "{location}"',
+            f'"security meetup" "{location}"'
         ])
 
-    # Important communities
-    queries.extend([
-        '"OWASP" India event',
-        '"OWASP" Hyderabad event',
-        '"OWASP" Bengaluru event',
-        '"OWASP" Mumbai event',
-        '"OWASP" Pune event',
-        '"Null community" India cybersecurity',
-        '"BSides" India cybersecurity',
-        '"cybersecurity" "Luma" India',
-        '"cybersecurity" "Meetup" India'
-    ])
+    # --------------------------------------------------------
+    # TOPIC SEARCHES
+    # --------------------------------------------------------
 
-    # Remove duplicates while preserving order
-    return list(dict.fromkeys(queries))
+    topics = [
+        "AppSec",
+        "Cloud Security",
+        "AI Security",
+        "SOC",
+        "DFIR",
+        "OSINT",
+        "Threat Intelligence",
+        "Digital Forensics",
+        "Incident Response",
+        "Penetration Testing",
+        "Ethical Hacking",
+        "Bug Bounty",
+        "VAPT",
+        "GRC",
+        "IAM",
+        "Network Security",
+        "CTF",
+        "Malware"
+    ]
+
+    for topic in topics:
+
+        queries.extend([
+            f'"{topic}" event India',
+            f'"{topic}" meetup India',
+            f'"{topic}" conference India'
+        ])
+
+    # Remove duplicate queries
+    return list(
+        dict.fromkeys(queries)
+    )
 
 
-def looks_like_cybersecurity_event(title, snippet):
+# ============================================================
+# EVENT KEYWORD FILTER
+# ============================================================
 
-    text = f"{title} {snippet}".lower()
+def is_possible_event(title, snippet):
 
-    # Must contain at least one cybersecurity keyword
-    has_cyber_keyword = any(
+    text = (
+        f"{title} {snippet}"
+    ).lower()
+
+    # Cybersecurity signal
+    cyber_signal = any(
         keyword.lower() in text
         for keyword in CYBERSECURITY_KEYWORDS
     )
 
-    if not has_cyber_keyword:
+    if not cyber_signal:
         return False
 
-    # Must contain an event-related term
+    # Event signal
     event_words = [
         "event",
         "meetup",
@@ -147,7 +225,9 @@ def looks_like_cybersecurity_event(title, snippet):
         "hackathon",
         "networking",
         "seminar",
-        "community"
+        "community",
+        "session",
+        "talk"
     ]
 
     return any(
@@ -156,66 +236,279 @@ def looks_like_cybersecurity_event(title, snippet):
     )
 
 
+# ============================================================
+# LOCATION DETECTION
+# ============================================================
+
+def detect_location(text):
+
+    text_lower = text.lower()
+
+    for location in INDIAN_LOCATIONS:
+
+        if location.lower() in text_lower:
+
+            return location
+
+    # Common location aliases
+    aliases = {
+        "bangalore": "Bengaluru",
+        "bengaluru": "Bengaluru",
+        "bombay": "Mumbai",
+        "calcutta": "Kolkata",
+        "madras": "Chennai",
+        "gurgaon": "Gurugram",
+        "new delhi": "Delhi"
+    }
+
+    for alias, location in aliases.items():
+
+        if alias in text_lower:
+            return location
+
+    if "online" in text_lower:
+        return "Online"
+
+    if "virtual" in text_lower:
+        return "Online"
+
+    return "India"
+
+
+# ============================================================
+# SOURCE DOMAIN
+# ============================================================
+
+def get_domain(url):
+
+    try:
+
+        domain = urlparse(url).netloc
+
+        domain = domain.lower()
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+
+    except Exception:
+
+        return ""
+
+
+# ============================================================
+# SOURCE RELIABILITY
+# ============================================================
+
+def source_score(url):
+
+    domain = get_domain(url)
+
+    trusted_domains = {
+
+        "owasp.org": 30,
+        "null.community": 30,
+        "securitybsides.com": 30,
+
+        "meetup.com": 20,
+        "eventbrite.com": 20,
+        "lu.ma": 20,
+
+        "linkedin.com": 15
+    }
+
+    for trusted_domain, score in trusted_domains.items():
+
+        if domain == trusted_domain:
+            return score
+
+        if domain.endswith("." + trusted_domain):
+            return score
+
+    return 5
+
+
+# ============================================================
+# EVENT CONFIDENCE
+# ============================================================
+
+def calculate_initial_score(event):
+
+    score = 40
+
+    score += source_score(
+        event["url"]
+    )
+
+    if event["location"] != "India":
+        score += 5
+
+    if event["location"] == "Online":
+        score += 5
+
+    if len(event["title"]) > 10:
+        score += 5
+
+    if len(event["snippet"]) > 50:
+        score += 5
+
+    return min(score, 100)
+
+
+# ============================================================
+# DISCOVERY
+# ============================================================
+
 def discover_events():
 
-    queries = build_search_queries()
+    queries = generate_queries()
 
-    print(f"🔎 Search queries: {len(queries)}")
+    print(
+        f"🔎 Generated {len(queries)} search queries"
+    )
 
     discovered = []
 
-    # Limit initial scan so we don't hammer the search engine.
-    # We'll increase coverage later.
-    for index, query in enumerate(queries[:25], start=1):
+    # Initial free scan limit
+    # We will increase this after testing.
+    scan_queries = queries[:40]
 
+    for index, query in enumerate(
+        scan_queries,
+        start=1
+    ):
+
+        print()
         print(
-            f"\n[{index}/{min(len(queries), 25)}] "
-            f"Searching: {query}"
+            f"[{index}/{len(scan_queries)}] "
+            f"Searching:"
         )
 
-        results = search_duckduckgo(query)
+        print(query)
 
-        print(f"   Results found: {len(results)}")
+        results = search_web(query)
+
+        print(
+            f"   Results: {len(results)}"
+        )
 
         for result in results:
 
-            if not looks_like_cybersecurity_event(
-                result["title"],
-                result["snippet"]
+            title = result["title"]
+
+            snippet = result["snippet"]
+
+            if not is_possible_event(
+                title,
+                snippet
             ):
                 continue
 
-            discovered.append({
-                "title": result["title"],
-                "url": result["url"],
-                "snippet": result["snippet"],
-                "search_query": query
-            })
+            combined_text = (
+                f"{title} {snippet}"
+            )
 
-    # Deduplicate URLs in memory only
-    unique = {}
+            location = detect_location(
+                combined_text
+            )
+
+            event = {
+                "title": title,
+                "url": result["url"],
+                "snippet": snippet,
+                "location": location,
+                "source": get_domain(
+                    result["url"]
+                ),
+                "search_query": query
+            }
+
+            event["confidence"] = (
+                calculate_initial_score(
+                    event
+                )
+            )
+
+            discovered.append(event)
+
+    # ========================================================
+    # DEDUPLICATION
+    # ========================================================
+
+    unique_events = {}
 
     for event in discovered:
 
         url = event["url"].split("#")[0]
 
-        if url not in unique:
-            unique[url] = event
+        if url not in unique_events:
 
-    events = list(unique.values())
+            unique_events[url] = event
 
-    print("\n========================================")
-    print(f"🔎 DISCOVERED EVENTS: {len(events)}")
-    print("========================================")
+    events = list(
+        unique_events.values()
+    )
 
-    for number, event in enumerate(events, start=1):
+    # ========================================================
+    # SORT BY CONFIDENCE
+    # ========================================================
 
-        print(f"\n{number}. {event['title']}")
-        print(f"   URL: {event['url']}")
-        print(f"   Source query: {event['search_query']}")
+    events.sort(
+        key=lambda x: x["confidence"],
+        reverse=True
+    )
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
+
+    print()
+    print(
+        "========================================"
+    )
+
+    print(
+        f"🔎 DISCOVERED EVENTS: {len(events)}"
+    )
+
+    print(
+        "========================================"
+    )
+
+    for number, event in enumerate(
+        events,
+        start=1
+    ):
+
+        print()
+        print(
+            f"{number}. {event['title']}"
+        )
+
+        print(
+            f"   📍 {event['location']}"
+        )
+
+        print(
+            f"   ⭐ Confidence: "
+            f"{event['confidence']}/100"
+        )
+
+        print(
+            f"   🌐 {event['source']}"
+        )
+
+        print(
+            f"   🔗 {event['url']}"
+        )
 
     return events
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 if __name__ == "__main__":
 
