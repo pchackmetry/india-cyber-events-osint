@@ -3,9 +3,14 @@ import requests
 
 # Telegram bot token is stored securely in GitHub Secrets
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 if not BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN is missing")
+
+if not CHAT_ID:
+    raise ValueError("TELEGRAM_CHAT_ID is missing")
+    
 
 
 def test_bot():
