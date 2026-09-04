@@ -1,23 +1,13 @@
-```yaml
 name: India Cybersecurity OSINT Scanner
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
-
-permissions:
-  contents: read
-
-concurrency:
-  group: india-cyber-events-osint
-  cancel-in-progress: false
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   scan:
-    name: Discover Cybersecurity Events
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -26,8 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: "pip"
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -44,4 +33,3 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python pipeline.py
-```
