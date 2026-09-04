@@ -25,6 +25,8 @@ USER_AGENT = (
     "Chrome/120.0 Safari/537.36"
 )
 
+MINIMUM_ACCEPT_SCORE = 40
+
 
 # ============================================================
 # VERIFICATION RESULT
@@ -236,6 +238,7 @@ INDIA_KEYWORDS = (
 
 NON_INDIA_COUNTRIES = (
     "united states",
+    "united states of america",
     "usa",
     "u.s.a",
     "u.s.",
@@ -348,7 +351,31 @@ CITY_STATE_COUNTRY = (
 
 
 # ============================================================
-# HELPERS
+# DATE PATTERNS
+# ============================================================
+
+MONTHS = (
+    "January|February|March|April|May|June|July|August|"
+    "September|October|November|December"
+)
+
+SHORT_MONTHS = (
+    "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+)
+
+DATE_PATTERNS = (
+    rf"\b\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}\b",
+    rf"\b(?:{MONTHS})\s+\d{{1,2}},\s+\d{{4}}\b",
+    rf"\b\d{{1,2}}\s+(?:{SHORT_MONTHS})\s+\d{{4}}\b",
+    rf"\b(?:{SHORT_MONTHS})\s+\d{{1,2}},\s+\d{{4}}\b",
+    r"\b\d{1,2}/\d{1,2}/\d{4}\b",
+    r"\b\d{1,2}-\d{1,2}-\d{4}\b",
+    r"\b\d{4}-\d{1,2}-\d{1,2}\b",
+)
+
+
+# ============================================================
+# BASIC HELPERS
 # ============================================================
 
 def clean_value(value: object) -> str:
@@ -357,7 +384,11 @@ def clean_value(value: object) -> str:
 
     text = str(value)
 
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
 
     text = re.sub(
         r"(,\s*){2,}",
@@ -476,27 +507,6 @@ def clean_title(
 # DATE PARSING
 # ============================================================
 
-MONTHS = (
-    "January|February|March|April|May|June|July|August|"
-    "September|October|November|December"
-)
-
-SHORT_MONTHS = (
-    "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
-)
-
-
-DATE_PATTERNS = (
-    rf"\b\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}\b",
-    rf"\b(?:{MONTHS})\s+\d{{1,2}},\s+\d{{4}}\b",
-    rf"\b\d{{1,2}}\s+(?:{SHORT_MONTHS})\s+\d{{4}}\b",
-    rf"\b(?:{SHORT_MONTHS})\s+\d{{1,2}},\s+\d{{4}}\b",
-    r"\b\d{1,2}/\d{1,2}/\d{4}\b",
-    r"\b\d{1,2}-\d{1,2}-\d{4}\b",
-    r"\b\d{4}-\d{1,2}-\d{1,2}\b",
-)
-
-
 def parse_date(
     value: str,
 ) -> date | None:
@@ -521,6 +531,7 @@ def parse_date(
     for fmt in formats:
 
         try:
+
             return datetime.strptime(
                 value,
                 fmt,
@@ -542,6 +553,7 @@ def iso_to_date(
     text = str(value).strip()
 
     try:
+
         return datetime.fromisoformat(
             text.replace(
                 "Z",
@@ -553,6 +565,7 @@ def iso_to_date(
         pass
 
     try:
+
         return date.fromisoformat(
             text[:10]
         )
@@ -568,6 +581,8 @@ def expand_date_range(
 ) -> list[date]:
 
     value = clean_value(value)
+
+    results = []
 
     # Example:
     # 4-5 September 2026
@@ -597,8 +612,6 @@ def expand_date_range(
             match.group(4)
         )
 
-        result = []
-
         for day_number in range(
             start_day,
             end_day + 1,
@@ -611,11 +624,11 @@ def expand_date_range(
             )
 
             if parsed:
-                result.append(
+                results.append(
                     parsed
                 )
 
-        return result
+        return results
 
     # Example:
     # September 4-5, 2026
@@ -645,8 +658,6 @@ def expand_date_range(
             match.group(4)
         )
 
-        result = []
-
         for day_number in range(
             start_day,
             end_day + 1,
@@ -659,215 +670,111 @@ def expand_date_range(
             )
 
             if parsed:
-                result.append(
+                results.append(
                     parsed
                 )
 
-        return result
-
-    parsed = parse_date(value)
-
-    if parsed:
-        return [parsed]
+        return results
 
     return []
 
 
-def dates_to_strings(
-    values: list[date],
-) -> list[str]:
+def extract_dates_from_text(
+    text: str,
+) -> list[date]:
 
-    return [
-        value.strftime(
-            "%d %B %Y"
-        )
-        for value in sorted(
-            set(values)
-        )
-    ]
+    dates = []
 
+    # First handle ranges.
+    for match in re.finditer(
+        rf"\b\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+"
+        rf"(?:{MONTHS})\s+\d{{4}}\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
 
-def format_event_dates(
-    detected_dates: list[str],
-) -> tuple[str, str]:
-
-    parsed = []
-
-    for value in detected_dates:
-
-        parsed.extend(
+        dates.extend(
             expand_date_range(
-                value
+                match.group(0)
             )
         )
 
-    parsed = sorted(
-        set(parsed)
-    )
+    for match in re.finditer(
+        rf"\b(?:{MONTHS})\s+\d{{1,2}}\s*[-–]\s*"
+        rf"\d{{1,2}},\s*\d{{4}}\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
 
-    if not parsed:
-        return "", ""
-
-    start = parsed[0]
-    end = parsed[-1]
-
-    if start == end:
-
-        return (
-            start.strftime(
-                "%d %B %Y"
-            ),
-            "",
-        )
-
-    return (
-        start.strftime(
-            "%d %B %Y"
-        ),
-        end.strftime(
-            "%d %B %Y"
-        ),
-    )
-
-
-def event_is_today(
-    detected_dates: list[str],
-) -> bool:
-
-    if not detected_dates:
-        return False
-
-    today = today_india()
-
-    parsed = []
-
-    for value in detected_dates:
-
-        parsed.extend(
+        dates.extend(
             expand_date_range(
-                value
+                match.group(0)
             )
         )
 
-    parsed = sorted(
-        set(parsed)
-    )
+    # Normal dates.
+    for pattern in DATE_PATTERNS:
 
-    if not parsed:
-        return False
-
-    return (
-        min(parsed)
-        <= today
-        <= max(parsed)
-    )
-
-
-def has_future_date(
-    detected_dates: list[str],
-) -> bool:
-
-    if not detected_dates:
-        return False
-
-    today = today_india()
-
-    for value in detected_dates:
-
-        for parsed in expand_date_range(
-            value
+        for match in re.finditer(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
         ):
 
-            if parsed >= today:
-                return True
+            parsed = parse_date(
+                match.group(0)
+            )
 
-    return False
+            if parsed:
+                dates.append(
+                    parsed
+                )
+
+    # Deduplicate.
+    unique_dates = sorted(
+        set(dates)
+    )
+
+    return unique_dates
+
+
+def format_date(
+    value: date | None,
+) -> str:
+
+    if not value:
+        return ""
+
+    return value.strftime(
+        "%d %B %Y"
+    )
 
 
 # ============================================================
-# JSON-LD
+# JSON-LD / STRUCTURED DATA
 # ============================================================
 
-def iter_json_objects(
-    value: object,
-):
-
-    if isinstance(
-        value,
-        dict,
-    ):
-
-        yield value
-
-        for child in value.values():
-
-            yield from iter_json_objects(
-                child
-            )
-
-    elif isinstance(
-        value,
-        list,
-    ):
-
-        for child in value:
-
-            yield from iter_json_objects(
-                child
-            )
-
-
-def is_event_type(
-    value: object,
-) -> bool:
-
-    if isinstance(
-        value,
-        str,
-    ):
-
-        lowered = value.lower()
-
-        return (
-            lowered == "event"
-            or lowered.endswith(
-                "event"
-            )
-        )
-
-    if isinstance(
-        value,
-        list,
-    ):
-
-        return any(
-            is_event_type(item)
-            for item in value
-        )
-
-    return False
-
-
-def extract_jsonld_events(
+def parse_json_ld(
     soup: BeautifulSoup,
 ) -> list[dict]:
 
     events = []
 
-    for script in soup.find_all(
+    scripts = soup.find_all(
         "script",
         attrs={
-            "type": re.compile(
-                r"application/ld\+json",
-                re.IGNORECASE,
-            )
+            "type": "application/ld+json"
         },
-    ):
+    )
 
-        raw = (
-            script.string
-            or script.get_text()
-        )
+    for script in scripts:
+
+        raw = script.string
+
+        if not raw:
+            raw = script.get_text(
+                strip=True
+            )
 
         if not raw:
             continue
@@ -875,34 +782,162 @@ def extract_jsonld_events(
         try:
 
             data = json.loads(
-                raw.strip()
+                raw
             )
 
         except (
             json.JSONDecodeError,
             TypeError,
         ):
+
             continue
 
-        for obj in iter_json_objects(
-            data
+        objects = []
+
+        if isinstance(
+            data,
+            dict,
         ):
 
+            objects.append(
+                data
+            )
+
+            graph = data.get(
+                "@graph"
+            )
+
+            if isinstance(
+                graph,
+                list,
+            ):
+
+                objects.extend(
+                    graph
+                )
+
+        elif isinstance(
+            data,
+            list,
+        ):
+
+            objects.extend(
+                data
+            )
+
+        for item in objects:
+
             if not isinstance(
-                obj,
+                item,
                 dict,
             ):
                 continue
 
-            if is_event_type(
-                obj.get("@type")
+            item_type = item.get(
+                "@type",
+                ""
+            )
+
+            if isinstance(
+                item_type,
+                list,
             ):
-                events.append(obj)
+
+                item_types = [
+                    str(x).lower()
+                    for x in item_type
+                ]
+
+            else:
+
+                item_types = [
+                    str(item_type).lower()
+                ]
+
+            if (
+                "event" in item_types
+                or any(
+                    "event" in value
+                    for value in item_types
+                )
+            ):
+
+                events.append(
+                    item
+                )
 
     return events
 
 
-def jsonld_address(
+def first_structured_event(
+    events: list[dict],
+) -> dict:
+
+    if not events:
+        return {}
+
+    # Prefer a complete Event object.
+    for event in events:
+
+        if (
+            event.get("startDate")
+            or event.get("location")
+            or event.get("name")
+        ):
+
+            return event
+
+    return events[0]
+
+
+# ============================================================
+# STRUCTURED DATE EXTRACTION
+# ============================================================
+
+def extract_structured_dates(
+    event: dict,
+) -> tuple[list[date], str, str]:
+
+    dates = []
+
+    start_date = event.get(
+        "startDate"
+    )
+
+    end_date = event.get(
+        "endDate"
+    )
+
+    start = iso_to_date(
+        start_date
+    )
+
+    end = iso_to_date(
+        end_date
+    )
+
+    if start:
+        dates.append(
+            start
+        )
+
+    if end:
+        dates.append(
+            end
+        )
+
+    return (
+        sorted(set(dates)),
+        format_date(start),
+        format_date(end),
+    )
+
+
+# ============================================================
+# LOCATION EXTRACTION
+# ============================================================
+
+def location_to_text(
     location: object,
 ) -> str:
 
@@ -922,20 +957,24 @@ def jsonld_address(
 
         return ""
 
-    address = location.get(
-        "address"
+    parts = []
+
+    name = clean_value(
+        location.get(
+            "name",
+            ""
+        )
     )
 
-    if isinstance(
-        address,
-        str,
-    ):
+    address = location.get(
+        "address",
+        ""
+    )
 
-        return clean_value(
-            address
+    if name:
+        parts.append(
+            name
         )
-
-    parts = []
 
     if isinstance(
         address,
@@ -950,39 +989,25 @@ def jsonld_address(
             "addressCountry",
         ):
 
-            value = address.get(
-                key
+            value = clean_value(
+                address.get(
+                    key,
+                    ""
+                )
             )
 
             if value:
-
                 parts.append(
-                    clean_value(
-                        value
-                    )
+                    value
                 )
 
-    if not parts:
+    elif address:
 
-        for key in (
-            "name",
-            "streetAddress",
-            "addressLocality",
-            "addressRegion",
-            "addressCountry",
-        ):
-
-            value = location.get(
-                key
+        parts.append(
+            clean_value(
+                address
             )
-
-            if value:
-
-                parts.append(
-                    clean_value(
-                        value
-                    )
-                )
+        )
 
     return ", ".join(
         dedupe_preserve_order(
@@ -991,219 +1016,33 @@ def jsonld_address(
     )
 
 
-def extract_structured_event(
-    events: list[dict],
-) -> dict:
-
-    if not events:
-        return {}
-
-    today = today_india()
-
-    candidates = []
-
-    for event in events:
-
-        score = 0
-
-        start = iso_to_date(
-            event.get(
-                "startDate"
-            )
-        )
-
-        end = (
-            iso_to_date(
-                event.get(
-                    "endDate"
-                )
-            )
-            or start
-        )
-
-        if start:
-
-            score += 40
-
-            if (
-                end
-                and start <= today <= end
-            ):
-
-                score += 100
-
-            elif start >= today:
-
-                score += 50
-
-        if event.get(
-            "location"
-        ):
-
-            score += 20
-
-        if event.get(
-            "name"
-        ):
-
-            score += 20
-
-        if event.get(
-            "organizer"
-        ):
-
-            score += 10
-
-        candidates.append(
-            (
-                score,
-                event,
-            )
-        )
-
-    candidates.sort(
-        key=lambda item: item[0],
-        reverse=True,
-    )
-
-    return candidates[0][1]
-
-
-# ============================================================
-# STRUCTURED EVENT FIELDS
-# ============================================================
-
-def apply_structured_event(
-    result: VerificationResult,
+def extract_location_from_structured(
     event: dict,
-    response_url: str,
-) -> None:
-
-    if not event:
-        return
-
-    result.structured_event_found = True
-
-    # --------------------------------------------------------
-    # Title
-    # --------------------------------------------------------
-
-    structured_title = clean_title(
-        event.get(
-            "name",
-            "",
-        )
-    )
-
-    if structured_title:
-
-        result.title = (
-            structured_title
-        )
-
-    # --------------------------------------------------------
-    # Dates
-    # --------------------------------------------------------
-
-    start = iso_to_date(
-        event.get(
-            "startDate"
-        )
-    )
-
-    end = (
-        iso_to_date(
-            event.get(
-                "endDate"
-            )
-        )
-        or start
-    )
-
-    if start:
-
-        dates = [start]
-
-        if (
-            end
-            and end >= start
-        ):
-
-            current = start
-
-            while current <= end:
-
-                if current not in dates:
-
-                    dates.append(
-                        current
-                    )
-
-                if len(dates) >= 15:
-                    break
-
-                current += timedelta(
-                    days=1
-                )
-
-        result.detected_dates = (
-            dates_to_strings(
-                dates
-            )
-        )
-
-        result.event_date = (
-            start.strftime(
-                "%d %B %Y"
-            )
-        )
-
-        if (
-            end
-            and end != start
-        ):
-
-            result.event_end_date = (
-                end.strftime(
-                    "%d %B %Y"
-                )
-            )
-
-        result.date_source = (
-            "JSON-LD Event"
-        )
-
-        result.has_date_signal = True
-
-    # --------------------------------------------------------
-    # Time
-    # --------------------------------------------------------
-
-    start_raw = event.get(
-        "startDate"
-    )
-
-    if start_raw:
-
-        time_match = re.search(
-            r"T(\d{2}:\d{2})"
-            r"(?::\d{2})?",
-            str(start_raw),
-        )
-
-        if time_match:
-
-            result.event_time = (
-                time_match.group(1)
-            )
-
-    # --------------------------------------------------------
-    # Location
-    # --------------------------------------------------------
+) -> tuple[str, str, str, str, str]:
 
     location = event.get(
         "location"
     )
+
+    if isinstance(
+        location,
+        list,
+    ):
+
+        location = (
+            location[0]
+            if location
+            else {}
+        )
+
+    location_text = location_to_text(
+        location
+    )
+
+    venue = ""
+    city = ""
+    state = ""
+    country = ""
 
     if isinstance(
         location,
@@ -1213,58 +1052,37 @@ def apply_structured_event(
         venue = clean_value(
             location.get(
                 "name",
-                "",
+                ""
             )
         )
 
         address = location.get(
-            "address"
+            "address",
+            {}
         )
-
-        city = ""
-        state = ""
-        country = ""
-        street = ""
-        postal_code = ""
 
         if isinstance(
             address,
             dict,
         ):
 
-            street = clean_value(
-                address.get(
-                    "streetAddress",
-                    "",
-                )
-            )
-
             city = clean_value(
                 address.get(
                     "addressLocality",
-                    "",
+                    ""
                 )
             )
 
             state = clean_value(
                 address.get(
                     "addressRegion",
-                    "",
+                    ""
                 )
             )
 
-            postal_code = clean_value(
-                address.get(
-                    "postalCode",
-                    "",
-                )
-            )
-
-            country_value = (
-                address.get(
-                    "addressCountry",
-                    "",
-                )
+            country_value = address.get(
+                "addressCountry",
+                ""
             )
 
             if isinstance(
@@ -1275,7 +1093,7 @@ def apply_structured_event(
                 country = clean_value(
                     country_value.get(
                         "name",
-                        "",
+                        ""
                     )
                 )
 
@@ -1285,106 +1103,152 @@ def apply_structured_event(
                     country_value
                 )
 
-        elif isinstance(
-            address,
-            str,
-        ):
+    return (
+        location_text,
+        venue,
+        city,
+        state,
+        country,
+    )
 
-            address_text = clean_value(
-                address
-            )
 
-            street = address_text
+# ============================================================
+# MODE DETECTION
+# ============================================================
 
-            (
-                city,
-                state,
-                country,
-            ) = infer_indian_city(
-                address_text
-            )
+def detect_event_mode(
+    text: str,
+    structured_event: dict,
+    location_text: str,
+) -> str:
 
-        parts = []
+    text_lower = text.lower()
 
-        if street:
-            parts.append(
-                street
-            )
-
-        if city:
-            parts.append(
-                city
-            )
-
-        if state:
-            parts.append(
-                state
-            )
-
-        if postal_code:
-            parts.append(
-                postal_code
-            )
-
-        if country:
-            parts.append(
-                country
-            )
-
-        parts = dedupe_preserve_order(
-            parts
+    structured_location = (
+        structured_event.get(
+            "location"
         )
+        if structured_event
+        else None
+    )
 
-        location_text = (
-            ", ".join(parts)
-        )
-
-        if venue and location_text:
-
-            result.event_location = (
-                f"{venue}, "
-                f"{location_text}"
-            )
-
-        elif location_text:
-
-            result.event_location = (
-                location_text
-            )
-
-        elif venue:
-
-            result.event_location = venue
-
-        result.event_venue = venue
-        result.event_city = city
-        result.event_state = state
-        result.event_country = country
-
-    elif isinstance(
-        location,
-        str,
+    if isinstance(
+        structured_location,
+        dict,
     ):
 
-        result.event_location = (
-            clean_value(
-                location
+        location_type = str(
+            structured_location.get(
+                "@type",
+                ""
             )
+        ).lower()
+
+        if "virtual" in location_type:
+
+            return "Online"
+
+        if "virtualLocation" in location_type:
+
+            return "Online"
+
+    if contains_keyword(
+        location_text,
+        ONLINE_KEYWORDS,
+    ):
+
+        return "Online"
+
+    online_count = keyword_count(
+        text_lower,
+        ONLINE_KEYWORDS,
+    )
+
+    physical_count = 0
+
+    for keyword in (
+        "venue",
+        "address",
+        "street",
+        "hall",
+        "auditorium",
+        "hotel",
+        "campus",
+        "office",
+    ):
+
+        if keyword in text_lower:
+            physical_count += 1
+
+    if (
+        online_count >= 2
+        and physical_count == 0
+    ):
+
+        return "Online"
+
+    if (
+        online_count > 0
+        and physical_count > 0
+    ):
+
+        return "Hybrid"
+
+    return "Offline"
+
+
+# ============================================================
+# TIME EXTRACTION
+# ============================================================
+
+TIME_PATTERNS = (
+    r"\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b",
+    r"\b\d{1,2}\s*(?:AM|PM|am|pm)\b",
+)
+
+
+def extract_time(
+    text: str,
+) -> str:
+
+    values = []
+
+    for pattern in TIME_PATTERNS:
+
+        matches = re.findall(
+            pattern,
+            text,
         )
 
-    if result.event_location:
-
-        result.has_location_signal = True
-
-        result.location_source = (
-            "JSON-LD Event"
+        values.extend(
+            matches
         )
 
-    # --------------------------------------------------------
-    # Organizer
-    # --------------------------------------------------------
+    values = dedupe_preserve_order(
+        values
+    )
 
-    organizer = event.get(
+    if not values:
+        return ""
+
+    if len(values) > 4:
+        values = values[:4]
+
+    return " – ".join(
+        values
+    )
+
+
+# ============================================================
+# ORGANIZER EXTRACTION
+# ============================================================
+
+def extract_organizer(
+    text: str,
+    structured_event: dict,
+) -> str:
+
+    organizer = structured_event.get(
         "organizer"
     )
 
@@ -1393,63 +1257,93 @@ def apply_structured_event(
         dict,
     ):
 
-        result.event_organizer = (
-            clean_value(
-                organizer.get(
-                    "name",
-                    "",
-                )
+        name = clean_value(
+            organizer.get(
+                "name",
+                ""
             )
         )
 
-    elif isinstance(
+        if name:
+            return name
+
+    if isinstance(
+        organizer,
+        list,
+    ):
+
+        for item in organizer:
+
+            if isinstance(
+                item,
+                dict,
+            ):
+
+                name = clean_value(
+                    item.get(
+                        "name",
+                        ""
+                    )
+                )
+
+                if name:
+                    return name
+
+            elif item:
+
+                return clean_value(
+                    item
+                )
+
+    if isinstance(
         organizer,
         str,
     ):
 
-        result.event_organizer = (
-            clean_value(
-                organizer
-            )
+        organizer = clean_value(
+            organizer
         )
 
-    # --------------------------------------------------------
-    # Event URL
-    # --------------------------------------------------------
+        if organizer:
+            return organizer
 
-    event_url = event.get(
-        "url"
+    patterns = (
+        r"(?:organized|hosted|presented|conducted)\s+by\s+"
+        r"([A-Z][A-Za-z0-9&.,' -]{2,80})",
+        r"(?:organizer|organised by|organized by)\s*[:\-]\s*"
+        r"([A-Z][A-Za-z0-9&.,' -]{2,80})",
     )
 
-    if event_url:
+    for pattern in patterns:
 
-        result.event_url = urljoin(
-            response_url,
-            str(event_url),
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
         )
 
-    # --------------------------------------------------------
-    # Description
-    # --------------------------------------------------------
+        if match:
 
-    description = event.get(
-        "description"
-    )
-
-    if description:
-
-        result.event_description = (
-            clean_description(
-                str(description)
+            return clean_value(
+                match.group(1)
             )
-        )
 
-    # --------------------------------------------------------
-    # Event type
-    # --------------------------------------------------------
+    return ""
 
-    event_type = event.get(
-        "eventType"
+
+# ============================================================
+# EVENT TYPE
+# ============================================================
+
+def extract_event_type(
+    title: str,
+    text: str,
+    structured_event: dict,
+) -> str:
+
+    event_type = structured_event.get(
+        "@type",
+        ""
     )
 
     if isinstance(
@@ -1457,25 +1351,67 @@ def apply_structured_event(
         list,
     ):
 
-        event_type = ", ".join(
-            clean_value(x)
-            for x in event_type
-            if clean_value(x)
-        )
+        for value in event_type:
 
-    if event_type:
-
-        result.event_type = (
-            clean_value(
-                event_type
+            value = clean_value(
+                value
             )
+
+            if (
+                value
+                and value.lower() != "event"
+            ):
+
+                return value
+
+    elif event_type:
+
+        value = clean_value(
+            event_type
         )
 
-    # --------------------------------------------------------
-    # Price
-    # --------------------------------------------------------
+        if (
+            value
+            and value.lower() != "event"
+        ):
 
-    offers = event.get(
+            return value
+
+    combined = (
+        f"{title} {text}"
+    ).lower()
+
+    for keyword in (
+        "webinar",
+        "conference",
+        "summit",
+        "workshop",
+        "meetup",
+        "hackathon",
+        "training",
+        "seminar",
+        "symposium",
+        "masterclass",
+        "bootcamp",
+        "roadshow",
+    ):
+
+        if keyword in combined:
+            return keyword.title()
+
+    return "Event"
+
+
+# ============================================================
+# PRICE EXTRACTION
+# ============================================================
+
+def extract_price(
+    text: str,
+    structured_event: dict,
+) -> str:
+
+    offers = structured_event.get(
         "offers"
     )
 
@@ -1484,379 +1420,426 @@ def apply_structured_event(
         dict,
     ):
 
-        price = offers.get(
-            "price"
+        price = clean_value(
+            offers.get(
+                "price",
+                ""
+            )
         )
 
         currency = clean_value(
             offers.get(
                 "priceCurrency",
-                "",
+                ""
             )
         )
 
-        if price is not None:
+        if price:
 
-            result.event_price = (
-                f"{price} {currency}"
-            ).strip()
-
-
-# ============================================================
-# FOCUSED DATE EXTRACTION
-# ============================================================
-
-def extract_dates_from_text(
-    text: str,
-) -> list[str]:
-
-    found = []
-
-    range_patterns = (
-        rf"\b\d{{1,2}}\s*[-–]\s*"
-        rf"\d{{1,2}}\s+"
-        rf"(?:{MONTHS})\s+"
-        rf"\d{{4}}\b",
-
-        rf"\b(?:{MONTHS})\s+"
-        rf"\d{{1,2}}\s*[-–]\s*"
-        rf"\d{{1,2}},\s*"
-        rf"\d{{4}}\b",
-    )
-
-    for pattern in range_patterns:
-
-        matches = re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        for match in matches:
-
-            if match not in found:
-
-                found.append(
-                    match
+            if currency:
+                return (
+                    f"{currency} {price}"
                 )
 
-    for pattern in DATE_PATTERNS:
+            return price
 
-        matches = re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        for match in matches:
-
-            if match not in found:
-
-                found.append(
-                    match
-                )
-
-    return found
-
-
-def extract_focused_event_dates(
-    soup: BeautifulSoup,
-) -> tuple[list[str], str]:
-
-    selectors = (
-        "[datetime]",
-        "time",
-        ".date",
-        ".event-date",
-        ".event_date",
-        ".eventDate",
-        ".start-date",
-        ".startDate",
-        ".event-details__date",
-        ".event-details",
-        ".event-info",
-        ".event-meta",
-    )
-
-    candidates = []
-
-    for selector in selectors:
-
-        try:
-
-            elements = soup.select(
-                selector
-            )
-
-        except Exception:
-
-            elements = []
-
-        for element in elements:
-
-            value = (
-                element.get(
-                    "datetime"
-                )
-                or element.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            if value:
-
-                candidates.append(
-                    clean_value(
-                        value
-                    )
-                )
-
-    # Date labels.
-    for element in soup.find_all(
-        string=re.compile(
-            r"\b("
-            r"event date|"
-            r"start date|"
-            r"date|"
-            r"when|"
-            r"starts"
-            r")\b",
-            re.IGNORECASE,
-        )
+    if isinstance(
+        offers,
+        list,
     ):
 
-        parent = element.parent
+        for offer in offers:
 
-        if not parent:
-            continue
+            if not isinstance(
+                offer,
+                dict,
+            ):
+                continue
 
-        block = clean_value(
-            parent.get_text(
+            price = clean_value(
+                offer.get(
+                    "price",
+                    ""
+                )
+            )
+
+            currency = clean_value(
+                offer.get(
+                    "priceCurrency",
+                    ""
+                )
+            )
+
+            if price:
+
+                if currency:
+                    return (
+                        f"{currency} {price}"
+                    )
+
+                return price
+
+    lowered = text.lower()
+
+    if re.search(
+        r"\bfree\b",
+        lowered,
+    ):
+
+        return "Free"
+
+    match = re.search(
+        r"(?:₹|rs\.?|inr)\s*[\d,]+(?:\.\d+)?",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if match:
+        return clean_value(
+            match.group(0)
+        )
+
+    match = re.search(
+        r"\b\d[\d,]*(?:\.\d+)?\s*(?:usd|inr|eur|gbp)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if match:
+        return clean_value(
+            match.group(0)
+        )
+
+    return ""
+
+
+# ============================================================
+# REGISTRATION URL
+# ============================================================
+
+def extract_registration_url(
+    soup: BeautifulSoup,
+    page_url: str,
+) -> str:
+
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
+
+        href = link.get(
+            "href",
+            ""
+        )
+
+        label = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        combined = (
+            f"{label} {href}"
+        ).lower()
+
+        if any(
+            keyword in combined
+            for keyword in REGISTRATION_KEYWORDS
+        ):
+
+            absolute = urljoin(
+                page_url,
+                href,
+            )
+
+            if absolute.startswith(
+                (
+                    "http://",
+                    "https://",
+                )
+            ):
+
+                return absolute
+
+    return ""
+
+
+# ============================================================
+# EVENT URL
+# ============================================================
+
+def extract_event_url(
+    structured_event: dict,
+    page_url: str,
+) -> str:
+
+    url = structured_event.get(
+        "url"
+    )
+
+    if url:
+
+        url = urljoin(
+            page_url,
+            str(url).strip(),
+        )
+
+        if url.startswith(
+            (
+                "http://",
+                "https://",
+            )
+        ):
+
+            return url
+
+    return page_url
+
+
+# ============================================================
+# DESCRIPTION
+# ============================================================
+
+def extract_description(
+    soup: BeautifulSoup,
+    structured_event: dict,
+) -> str:
+
+    description = clean_value(
+        structured_event.get(
+            "description",
+            ""
+        )
+    )
+
+    if description:
+        return description
+
+    meta = soup.find(
+        "meta",
+        attrs={
+            "name": "description"
+        },
+    )
+
+    if meta:
+
+        description = clean_value(
+            meta.get(
+                "content",
+                ""
+            )
+        )
+
+        if description:
+            return description
+
+    paragraph_text = []
+
+    for paragraph in soup.find_all(
+        "p"
+    )[:10]:
+
+        text = clean_value(
+            paragraph.get_text(
                 " ",
                 strip=True,
             )
         )
 
-        if len(block) <= 500:
+        if len(text) >= 40:
 
-            candidates.append(
-                block
+            paragraph_text.append(
+                text
             )
 
-    parsed = []
-
-    for candidate in candidates:
-
-        for date_text in (
-            extract_dates_from_text(
-                candidate
-            )
-        ):
-
-            parsed.extend(
-                expand_date_range(
-                    date_text
-                )
-            )
-
-        direct = iso_to_date(
-            candidate
-        )
-
-        if direct:
-
-            parsed.append(
-                direct
-            )
-
-    parsed = sorted(
-        set(parsed)
-    )
-
-    today = today_india()
-
-    # Ignore old unrelated dates where possible.
-    relevant = [
-        value
-        for value in parsed
-        if value >= today - timedelta(
-            days=1
-        )
-    ]
-
-    if relevant:
-
-        parsed = relevant
-
-    if len(parsed) > 15:
-
-        parsed = parsed[:15]
-
-    if not parsed:
-
-        return [], ""
-
-    return (
-        dates_to_strings(
-            parsed
-        ),
-        "focused HTML/date extraction",
+    return " ".join(
+        paragraph_text[:3]
     )
 
 
 # ============================================================
-# INDIAN CITY DETECTION
+# LOCATION VALIDATION
 # ============================================================
 
-def infer_indian_city(
-    text: str,
-) -> tuple[str, str, str]:
+def detect_india_location(
+    location_text: str,
+    page_text: str,
+    event_mode: str,
+    event_country: str = "",
+) -> tuple[bool, str]:
 
-    lowered = text.lower()
+    location_lower = (
+        f"{location_text} "
+        f"{event_country}"
+    ).lower()
 
-    for (
-        city,
-        state,
-        country,
-    ) in CITY_STATE_COUNTRY:
+    page_lower = page_text.lower()
 
-        if re.search(
-            rf"\b{re.escape(city.lower())}\b",
-            lowered,
+    # Online events can be international.
+    if event_mode == "Online":
+
+        return (
+            True,
+            "Online/remote event - international events allowed",
+        )
+
+    # Hybrid must have an Indian physical component.
+    if event_mode == "Hybrid":
+
+        if (
+            contains_keyword(
+                location_lower,
+                INDIA_KEYWORDS,
+            )
+            or contains_keyword(
+                page_lower,
+                INDIA_KEYWORDS,
+            )
         ):
 
             return (
-                city,
-                state,
-                country,
+                True,
+                "Hybrid event has Indian location",
             )
 
-    return "", "", ""
-
-
-# ============================================================
-# LOCATION CLEANING
-# ============================================================
-
-def clean_location(
-    location: str,
-) -> str:
-
-    location = clean_value(
-        location
-    )
-
-    if not location:
-        return ""
-
-    # Remove repeated identical comma-separated components.
-    parts = [
-        clean_value(part)
-        for part in location.split(",")
-    ]
-
-    cleaned_parts = []
-    seen = set()
-
-    for part in parts:
-
-        if not part:
-            continue
-
-        key = part.lower()
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-
-        cleaned_parts.append(
-            part
-        )
-
-    location = ", ".join(
-        cleaned_parts
-    )
-
-    # Remove obvious duplicate sequences.
-    changed = True
-
-    while changed:
-
-        changed = False
-
-        parts = [
-            clean_value(part)
-            for part in location.split(",")
-        ]
-
-        for size in range(
-            min(4, len(parts) // 2),
-            0,
-            -1,
+        if contains_keyword(
+            location_lower,
+            NON_INDIA_COUNTRIES,
         ):
 
-            first = [
-                x.lower()
-                for x in parts[:size]
-            ]
+            return (
+                False,
+                "Hybrid event appears outside India",
+            )
 
-            second = [
-                x.lower()
-                for x in parts[
-                    size:size * 2
-                ]
-            ]
+        return (
+            False,
+            "Hybrid event has no verified Indian location",
+        )
 
-            if (
-                first
-                and first == second
-            ):
+    # Physical Indian city.
+    for city, state, country in CITY_STATE_COUNTRY:
 
-                parts = parts[size:]
+        if city.lower() in location_lower:
 
-                location = ", ".join(
-                    parts
-                )
+            return (
+                True,
+                f"Indian city detected: {city}",
+            )
 
-                changed = True
-                break
+    # Explicit India.
+    if "india" in location_lower:
 
-    return clean_value(
-        location
+        return (
+            True,
+            "India explicitly detected in location",
+        )
+
+    # Indian state.
+    for keyword in INDIA_KEYWORDS:
+
+        if keyword in location_lower:
+
+            return (
+                True,
+                f"Indian location detected: {keyword}",
+            )
+
+    # Foreign physical location.
+    for country in NON_INDIA_COUNTRIES:
+
+        if country in location_lower:
+
+            return (
+                False,
+                f"Foreign physical location detected: {country}",
+            )
+
+    # Do NOT accept India merely because it appears
+    # somewhere unrelated on the page.
+    return (
+        False,
+        "Physical event has no verified Indian location",
     )
 
 
 # ============================================================
-# LOCATION EXTRACTION
+# DATE VALIDATION
 # ============================================================
 
-def extract_html_location(
+def validate_dates(
+    detected_dates: list[date],
+) -> tuple[bool, bool, str]:
+
+    today = today_india()
+
+    if not detected_dates:
+
+        return (
+            False,
+            False,
+            "No event date detected",
+        )
+
+    future_or_today = any(
+        value >= today
+        for value in detected_dates
+    )
+
+    if not future_or_today:
+
+        return (
+            True,
+            False,
+            "All detected event dates are in the past",
+        )
+
+    return (
+        True,
+        True,
+        "",
+    )
+
+
+# ============================================================
+# DATE EXTRACTION FOCUS
+# ============================================================
+
+def extract_event_dates(
     soup: BeautifulSoup,
-) -> tuple[
-    str,
-    str,
-    str,
-    str,
-    str,
-]:
+    structured_event: dict,
+) -> tuple[list[date], str]:
 
-    selectors = (
-        "[itemprop='location']",
-        "[itemprop='address']",
-        ".location",
-        ".event-location",
-        ".event_location",
-        ".venue",
-        ".event-venue",
-        ".address",
-        ".event-address",
+    # Strongest source: Schema.org.
+    structured_dates, start_text, end_text = (
+        extract_structured_dates(
+            structured_event
+        )
     )
 
-    candidates = []
+    if structured_dates:
 
-    for selector in selectors:
+        return (
+            structured_dates,
+            "Schema.org/Event structured data",
+        )
+
+    # Search focused event-related areas first.
+    focused_parts = []
+
+    for selector in (
+        "time",
+        "[datetime]",
+        ".event-date",
+        ".event-date-time",
+        ".date",
+        ".datetime",
+        ".start-date",
+        ".end-date",
+        ".event-details",
+        ".event-info",
+        "main",
+    ):
 
         try:
 
@@ -1865,7 +1848,6 @@ def extract_html_location(
             )
 
         except Exception:
-
             elements = []
 
         for element in elements[:20]:
@@ -1877,793 +1859,245 @@ def extract_html_location(
                 )
             )
 
-            if not text:
-                continue
-
-            if len(text) > 500:
-                continue
-
-            candidates.append(
-                text
-            )
-
-    candidates = (
-        dedupe_preserve_order(
-            candidates
-        )
-    )
-
-    if not candidates:
-
-        return (
-            "",
-            "",
-            "",
-            "",
-            "",
-        )
-
-    # Prefer the shortest meaningful location.
-    candidates.sort(
-        key=lambda x: (
-            len(x),
-            x.lower().count(","),
-        )
-    )
-
-    location = clean_location(
-        candidates[0]
-    )
-
-    city, state, country = (
-        infer_indian_city(
-            location
-        )
-    )
-
-    return (
-        location,
-        city,
-        state,
-        country,
-        "HTML location element",
-    )
-
-
-# ============================================================
-# VENUE
-# ============================================================
-
-def extract_html_venue(
-    soup: BeautifulSoup,
-) -> str:
-
-    selectors = (
-        "[itemprop='location'] [itemprop='name']",
-        ".venue-name",
-        ".event-venue",
-        ".venue",
-        "[class*='venue-name']",
-    )
-
-    candidates = []
-
-    for selector in selectors:
-
-        try:
-
-            elements = soup.select(
-                selector
-            )
-
-        except Exception:
-
-            elements = []
-
-        for element in elements[:10]:
-
-            text = clean_value(
-                element.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            if not text:
-                continue
-
-            if len(text) > 150:
-                continue
-
-            candidates.append(
-                text
-            )
-
-    for candidate in (
-        dedupe_preserve_order(
-            candidates
-        )
-    ):
-
-        if candidate.lower() in (
-            "location",
-            "venue",
-            "address",
-        ):
-            continue
-
-        return candidate
-
-    return ""
-
-
-# ============================================================
-# TIME
-# ============================================================
-
-def extract_time(
-    text: str,
-) -> str:
-
-    patterns = (
-        r"\b\d{1,2}:\d{2}\s*"
-        r"(?:AM|PM)"
-        r"\s*[-–—]\s*"
-        r"\d{1,2}:\d{2}\s*"
-        r"(?:AM|PM)\b",
-
-        r"\b\d{1,2}\s*"
-        r"(?:AM|PM)"
-        r"\s*[-–—]\s*"
-        r"\d{1,2}\s*"
-        r"(?:AM|PM)\b",
-
-        r"\b\d{1,2}:\d{2}\s*"
-        r"(?:AM|PM)\b",
-
-        r"\b\d{1,2}\s*"
-        r"(?:AM|PM)\b",
-    )
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-
-            return clean_value(
-                match.group(0)
-            )
-
-    return ""
-
-
-# ============================================================
-# ORGANIZER
-# ============================================================
-
-def extract_organizer(
-    soup: BeautifulSoup,
-) -> str:
-
-    selectors = (
-        "[itemprop='organizer']",
-        ".organizer",
-        ".event-organizer",
-        ".event_organizer",
-        "[class*='organizer']",
-    )
-
-    for selector in selectors:
-
-        try:
-
-            elements = soup.select(
-                selector
-            )
-
-        except Exception:
-
-            elements = []
-
-        for element in elements[:10]:
-
-            text = clean_value(
-                element.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            if (
-                text
-                and len(text) <= 150
-            ):
-
-                return text
-
-    return ""
-
-
-# ============================================================
-# EVENT TYPE
-# ============================================================
-
-def detect_event_type(
-    title: str,
-    text: str,
-) -> str:
-
-    combined = (
-        f"{title} {text}"
-    ).lower()
-
-    mapping = (
-        ("hackathon", "Hackathon"),
-        ("bootcamp", "Bootcamp"),
-        ("workshop", "Workshop"),
-        ("webinar", "Webinar"),
-        ("conference", "Conference"),
-        ("summit", "Summit"),
-        ("meetup", "Meetup"),
-        ("training", "Training"),
-        ("seminar", "Seminar"),
-        ("symposium", "Symposium"),
-        ("masterclass", "Masterclass"),
-        ("competition", "Competition"),
-        ("challenge", "Challenge"),
-        ("forum", "Forum"),
-        ("expo", "Expo"),
-        ("session", "Session"),
-        ("talk", "Talk"),
-    )
-
-    for keyword, label in mapping:
-
-        if keyword in combined:
-
-            return label
-
-    return ""
-
-
-# ============================================================
-# EVENT MODE
-# ============================================================
-
-def detect_event_mode(
-    text: str,
-) -> str:
-
-    lowered = text.lower()
-
-    online = any(
-        value in lowered
-        for value in (
-            "online",
-            "virtual",
-            "remote",
-            "zoom",
-            "webex",
-            "microsoft teams",
-            "google meet",
-        )
-    )
-
-    offline = any(
-        value in lowered
-        for value in (
-            "in person",
-            "in-person",
-            "onsite",
-            "on-site",
-            "physical event",
-            "venue",
-            "hotel",
-            "convention centre",
-            "convention center",
-        )
-    )
-
-    if online and offline:
-        return "Hybrid"
-
-    if online:
-        return "Online"
-
-    if offline:
-        return "Offline"
-
-    return ""
-
-
-# ============================================================
-# PRICE
-# ============================================================
-
-def extract_price(
-    text: str,
-) -> str:
-
-    if re.search(
-        r"\bfree\b",
-        text,
-        flags=re.IGNORECASE,
-    ):
-
-        return "Free"
-
-    patterns = (
-        r"(?:₹|Rs\.?|INR)\s*"
-        r"[\d,]+(?:\.\d{1,2})?",
-
-        r"\$\s*"
-        r"[\d,]+(?:\.\d{1,2})?",
-
-        r"€\s*"
-        r"[\d,]+(?:\.\d{1,2})?",
-    )
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-
-            return clean_value(
-                match.group(0)
-            )
-
-    return ""
-
-
-# ============================================================
-# REGISTRATION
-# ============================================================
-
-def extract_registration_url(
-    soup: BeautifulSoup,
-    base_url: str,
-) -> str:
-
-    for link in soup.find_all(
-        "a",
-        href=True,
-    ):
-
-        label = clean_value(
-            link.get_text(
-                " ",
-                strip=True,
-            )
-        ).lower()
-
-        href = clean_value(
-            link.get(
-                "href",
-                "",
-            )
-        )
-
-        if not href:
-            continue
-
-        if any(
-            keyword in label
-            for keyword in (
-                "register",
-                "registration",
-                "ticket",
-                "tickets",
-                "rsvp",
-                "sign up",
-                "signup",
-                "book now",
-                "reserve",
-                "join",
-            )
-        ):
-
-            return urljoin(
-                base_url,
-                href,
-            )
-
-    return ""
-
-
-# ============================================================
-# DESCRIPTION
-# ============================================================
-
-def clean_description(
-    description: str,
-) -> str:
-
-    description = clean_value(
-        description
-    )
-
-    description = re.sub(
-        r"[*_~`]+",
-        "",
-        description,
-    )
-
-    description = re.sub(
-        r"\b(skip to content|"
-        r"skip to main content|"
-        r"navigation|menu)\b",
-        "",
-        description,
-        flags=re.IGNORECASE,
-    )
-
-    description = clean_value(
-        description
-    )
-
-    if len(description) > 1000:
-
-        description = (
-            description[:997]
-            + "..."
-        )
-
-    return description
-
-
-def extract_description(
-    soup: BeautifulSoup,
-) -> str:
-
-    selectors = (
-        "[itemprop='description']",
-        "meta[name='description']",
-        "meta[property='og:description']",
-        ".event-description",
-        ".event_description",
-        ".description",
-        "article",
-    )
-
-    candidates = []
-
-    for selector in selectors:
-
-        try:
-
-            elements = soup.select(
-                selector
-            )
-
-        except Exception:
-
-            elements = []
-
-        for element in elements[:10]:
-
-            if element.name == "meta":
-
-                text = clean_value(
-                    element.get(
-                        "content",
-                        "",
-                    )
-                )
-
-            else:
-
-                text = clean_value(
-                    element.get_text(
-                        " ",
-                        strip=True,
-                    )
-                )
-
-            if (
-                text
-                and len(text) >= 40
-            ):
-
-                candidates.append(
+            if text:
+                focused_parts.append(
                     text
                 )
 
-    candidates = (
-        dedupe_preserve_order(
-            candidates
-        )
-    )
-
-    if not candidates:
-
-        return ""
-
-    return clean_description(
-        candidates[0]
-    )
-
-
-# ============================================================
-# CYBERSECURITY VALIDATION
-# ============================================================
-
-def cybersecurity_relevance(
-    title: str,
-    description: str,
-    text: str,
-) -> tuple[bool, int]:
-
-    title_hits = keyword_count(
-        title,
-        CYBER_KEYWORDS,
-    )
-
-    description_hits = keyword_count(
-        description,
-        CYBER_KEYWORDS,
-    )
-
-    full_hits = keyword_count(
-        text,
-        CYBER_KEYWORDS,
-    )
-
-    # Strongest signal:
-    # cybersecurity term in title.
-    if title_hits > 0:
-
-        return (
-            True,
-            min(
-                100,
-                70 + title_hits * 10,
-            ),
-        )
-
-    # Cybersecurity mentioned in actual description.
-    if description_hits > 0:
-
-        return (
-            True,
-            min(
-                100,
-                60 + description_hits * 10,
-            ),
-        )
-
-    # Multiple cyber signals throughout page.
-    if full_hits >= 2:
-
-        return (
-            True,
-            min(
-                100,
-                50 + full_hits * 5,
-            ),
-        )
-
-    return False, 0
-
-
-# ============================================================
-# EVENT VALIDATION
-# ============================================================
-
-def event_relevance(
-    title: str,
-    text: str,
-) -> bool:
-
-    title_lower = title.lower()
-
-    # Strong event indicators.
-    if contains_keyword(
-        title,
-        EVENT_KEYWORDS,
-    ):
-
-        return True
-
-    # If the title is weak, look for event terms
-    # in the page.
-    return contains_keyword(
-        text,
-        EVENT_KEYWORDS,
-    )
-
-
-# ============================================================
-# INDIA / INTERNATIONAL ONLINE VALIDATION
-# ============================================================
-
-def detect_india_location(
-    location_text: str,
-    page_text: str,
-    event_mode: str,
-) -> tuple[
-    bool,
-    str,
-    str,
-    str,
-    str,
-]:
-
-    location_lower = (
-        location_text.lower()
-    )
-
-    mode_lower = (
-        event_mode.lower()
-    )
-
-    # --------------------------------------------------------
-    # ONLINE / REMOTE / VIRTUAL
-    # --------------------------------------------------------
-    #
-    # IMPORTANT:
-    #
-    # International online cybersecurity events
-    # are allowed.
-    #
-    # Example:
-    # USA online cybersecurity event -> ALLOW
-    # UK remote AppSec webinar -> ALLOW
-    # Singapore virtual security summit -> ALLOW
-    #
-    # India is NOT required for online events.
-    # --------------------------------------------------------
-
-    is_remote = (
-        "online" in mode_lower
-        or "remote" in mode_lower
-        or "virtual" in mode_lower
-        or contains_keyword(
-            location_text,
-            ONLINE_KEYWORDS,
-        )
-        or contains_keyword(
-            page_text,
-            ONLINE_KEYWORDS,
-        )
-    )
-
-    if is_remote:
-
-        city, state, country = (
-            infer_indian_city(
-                location_text
-            )
-        )
-
-        if city:
-
-            return (
-                True,
-                city,
-                state,
-                country,
-                "Online/remote event with Indian location",
+            datetime_value = element.get(
+                "datetime"
             )
 
+            if datetime_value:
+                focused_parts.append(
+                    str(datetime_value)
+                )
+
+    focused_text = " ".join(
+        focused_parts
+    )
+
+    focused_dates = extract_dates_from_text(
+        focused_text
+    )
+
+    if focused_dates:
+
         return (
-            True,
-            "",
-            "",
-            "",
-            "Online/remote event - international events allowed",
+            focused_dates,
+            "Focused event page content",
         )
 
-    # --------------------------------------------------------
-    # PHYSICAL EVENTS
-    # --------------------------------------------------------
-    #
-    # Physical events MUST be in India.
-    # --------------------------------------------------------
-
-    city, state, country = (
-        infer_indian_city(
-            location_text
+    # Last fallback: page text.
+    page_text = clean_value(
+        soup.get_text(
+            " ",
+            strip=True,
         )
     )
 
-    if city:
-
-        return (
-            True,
-            city,
-            state,
-            country,
-            "Indian city detected in event location",
-        )
-
-    if re.search(
-        r"\bindia\b",
-        location_lower,
-        flags=re.IGNORECASE,
-    ):
-
-        return (
-            True,
-            "",
-            "",
-            "India",
-            "India detected in event location",
-        )
-
-    # Explicit foreign physical location.
-    for country_name in (
-        NON_INDIA_COUNTRIES
-    ):
-
-        if country_name in location_lower:
-
-            return (
-                False,
-                "",
-                "",
-                "",
-                (
-                    "Physical event outside India: "
-                    f"{country_name}"
-                ),
-            )
+    dates = extract_dates_from_text(
+        page_text
+    )
 
     return (
-        False,
-        "",
-        "",
-        "",
-        "Physical event location is not in India",
+        dates,
+        "Page text fallback",
     )
 
 
 # ============================================================
-# MAIN VERIFICATION
+# SCORE
+# ============================================================
+
+def calculate_score(
+    result: VerificationResult,
+) -> int:
+
+    score = 0
+
+    # Reachability.
+    if result.reachable:
+        score += 10
+
+    # Strong structured event data.
+    if result.structured_event_found:
+        score += 25
+
+    # Cybersecurity relevance.
+    if result.has_cyber_signal:
+        score += 20
+
+    # Recognizable event.
+    if result.has_event_signal:
+        score += 10
+
+    # Date.
+    if result.has_date_signal:
+        score += 10
+
+    # Future/today date.
+    if result.has_future_date:
+        score += 5
+
+    # Registration.
+    if result.has_registration_signal:
+        score += 5
+
+    # Location.
+    if result.has_location_signal:
+        score += 5
+
+    # Verified India physical/hybrid.
+    if result.has_india_location:
+        score += 5
+
+    # Online event gets a smaller location-related confidence
+    # because international online events are allowed.
+    if (
+        result.has_online_signal
+        and result.event_mode == "Online"
+    ):
+
+        score += 5
+
+    # Strong final validation.
+    if result.is_cyber_event:
+        score += 5
+
+    if result.is_event_page:
+        score += 5
+
+    # --------------------------------------------------------
+    # Hard safety caps
+    # --------------------------------------------------------
+
+    if not result.is_cyber_event:
+        score = min(
+            score,
+            25,
+        )
+
+    if not result.is_event_page:
+        score = min(
+            score,
+            30,
+        )
+
+    if not result.has_date_signal:
+        score = min(
+            score,
+            30,
+        )
+
+    if (
+        result.event_mode != "Online"
+        and not result.has_india_location
+    ):
+
+        score = min(
+            score,
+            35,
+        )
+
+    if (
+        result.rejected_reason
+        and not result.is_cyber_event
+    ):
+
+        score = min(
+            score,
+            25,
+        )
+
+    return max(
+        0,
+        min(
+            100,
+            score,
+        ),
+    )
+
+
+# ============================================================
+# VERIFICATION SCORE HELPER
+# ============================================================
+
+def verification_score(
+    result: VerificationResult,
+) -> int:
+    """
+    Return the final verification score.
+
+    pipeline.py imports this function directly.
+    """
+
+    if not isinstance(
+        result,
+        VerificationResult,
+    ):
+
+        return 0
+
+    return int(
+        getattr(
+            result,
+            "score",
+            0,
+        )
+    )
+
+
+# ============================================================
+# VERIFY EVENT
 # ============================================================
 
 def verify_event(
     url: str,
 ) -> VerificationResult:
 
-    result = VerificationResult(
-        event_url=url
-    )
+    result = VerificationResult()
+
+    if not url:
+        result.rejected_reason = (
+            "Empty URL"
+        )
+        return result
+
+    if not url.startswith(
+        (
+            "http://",
+            "https://",
+        )
+    ):
+
+        result.rejected_reason = (
+            "Invalid URL"
+        )
+
+        return result
 
     # --------------------------------------------------------
-    # DOWNLOAD PAGE
+    # Fetch page
     # --------------------------------------------------------
+
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
     try:
 
         response = requests.get(
             url,
+            headers=headers,
             timeout=TIMEOUT,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept-Language": (
-                    "en-US,en;q=0.9"
-                ),
-            },
             allow_redirects=True,
         )
 
         response.raise_for_status()
 
-        result.reachable = True
-
     except requests.RequestException as exc:
-
-        result.reachable = False
 
         result.rejected_reason = (
             f"Page unreachable: {exc}"
@@ -2671,8 +2105,12 @@ def verify_event(
 
         return result
 
+    result.reachable = True
+
+    final_url = response.url or url
+
     # --------------------------------------------------------
-    # PARSE HTML
+    # Parse HTML
     # --------------------------------------------------------
 
     soup = BeautifulSoup(
@@ -2680,116 +2118,19 @@ def verify_event(
         "html.parser",
     )
 
-    # --------------------------------------------------------
-    # JSON-LD MUST BE READ BEFORE SCRIPT REMOVAL
-    # --------------------------------------------------------
-
-    structured_events = (
-        extract_jsonld_events(
-            soup
-        )
-    )
-
-    structured_event = (
-        extract_structured_event(
-            structured_events
-        )
-    )
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
-    title = ""
-
-    # OpenGraph title.
-    og_title = soup.find(
-        "meta",
-        attrs={
-            "property": "og:title"
-        },
-    )
-
-    if og_title:
-
-        title = clean_title(
-            og_title.get(
-                "content",
-                "",
-            )
-        )
-
-    # HTML title.
-    if not title:
-
-        title_tag = soup.find(
-            "title"
-        )
-
-        if title_tag:
-
-            title = clean_title(
-                title_tag.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-    # JSON-LD title has priority.
-    if structured_event:
-
-        structured_title = (
-            clean_title(
-                structured_event.get(
-                    "name",
-                    "",
-                )
-            )
-        )
-
-        if structured_title:
-
-            title = (
-                structured_title
-            )
-
-    result.title = title
-
-    # --------------------------------------------------------
-    # APPLY STRUCTURED EVENT
-    # --------------------------------------------------------
-
-    if structured_event:
-
-        apply_structured_event(
-            result,
-            structured_event,
-            response.url,
-        )
-
-    # --------------------------------------------------------
-    # REMOVE NON-CONTENT ELEMENTS
-    # --------------------------------------------------------
-
+    # Remove noise.
     for element in soup(
         [
             "script",
             "style",
             "noscript",
             "svg",
-            "nav",
-            "footer",
-            "header",
         ]
     ):
 
         element.decompose()
 
-    # --------------------------------------------------------
-    # CLEAN PAGE TEXT
-    # --------------------------------------------------------
-
-    page_text = normalize_text(
+    page_text = clean_value(
         soup.get_text(
             " ",
             strip=True,
@@ -2799,204 +2140,245 @@ def verify_event(
     result.text = page_text
 
     # --------------------------------------------------------
-    # DESCRIPTION
+    # Title
     # --------------------------------------------------------
 
-    if not result.event_description:
+    title = ""
 
-        result.event_description = (
-            extract_description(
-                soup
+    if soup.title:
+
+        title = clean_title(
+            soup.title.get_text(
+                " ",
+                strip=True,
             )
         )
 
+    if not title:
+
+        h1 = soup.find(
+            "h1"
+        )
+
+        if h1:
+
+            title = clean_title(
+                h1.get_text(
+                    " ",
+                    strip=True,
+                )
+            )
+
+    result.title = title
+
     # --------------------------------------------------------
-    # CYBERSECURITY CHECK
+    # JSON-LD
     # --------------------------------------------------------
 
-    (
-        cyber_ok,
-        cyber_strength,
-    ) = cybersecurity_relevance(
-        result.title,
-        result.event_description,
-        page_text,
+    structured_events = parse_json_ld(
+        BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
     )
 
-    result.is_cyber_event = (
-        cyber_ok
+    structured_event = first_structured_event(
+        structured_events
     )
+
+    result.structured_event_found = bool(
+        structured_event
+    )
+
+    # --------------------------------------------------------
+    # Basic combined text
+    # --------------------------------------------------------
+
+    combined_text = (
+        f"{result.title} "
+        f"{page_text}"
+    )
+
+    # --------------------------------------------------------
+    # Event relevance
+    # --------------------------------------------------------
 
     result.has_cyber_signal = (
-        cyber_ok
-    )
-
-    # --------------------------------------------------------
-    # EVENT CHECK
-    # --------------------------------------------------------
-
-    result.is_event_page = (
-        event_relevance(
-            result.title,
-            page_text,
+        contains_keyword(
+            combined_text,
+            CYBER_KEYWORDS,
         )
     )
 
     result.has_event_signal = (
-        result.is_event_page
-    )
-
-    # --------------------------------------------------------
-    # DATE CHECK
-    # --------------------------------------------------------
-
-    if not result.detected_dates:
-
-        (
-            dates,
-            date_source,
-        ) = extract_focused_event_dates(
-            soup
-        )
-
-        if dates:
-
-            result.detected_dates = (
-                dates
-            )
-
-            result.date_source = (
-                date_source
-            )
-
-            result.has_date_signal = True
-
-            (
-                result.event_date,
-                result.event_end_date,
-            ) = format_event_dates(
-                dates
-            )
-
-    result.has_future_date = (
-        has_future_date(
-            result.detected_dates
+        contains_keyword(
+            combined_text,
+            EVENT_KEYWORDS,
         )
     )
 
     # --------------------------------------------------------
-    # LOCATION CHECK
+    # Structured title/name can be stronger.
+    # --------------------------------------------------------
+
+    structured_name = clean_value(
+        structured_event.get(
+            "name",
+            ""
+        )
+    )
+
+    if structured_name:
+
+        if contains_keyword(
+            structured_name,
+            CYBER_KEYWORDS,
+        ):
+
+            result.has_cyber_signal = True
+
+        if contains_keyword(
+            structured_name,
+            EVENT_KEYWORDS,
+        ):
+
+            result.has_event_signal = True
+
+    # --------------------------------------------------------
+    # Date
+    # --------------------------------------------------------
+
+    detected_dates, date_source = (
+        extract_event_dates(
+            soup,
+            structured_event,
+        )
+    )
+
+    result.detected_dates = [
+        format_date(value)
+        for value in detected_dates
+    ]
+
+    result.date_source = date_source
+
+    (
+        result.has_date_signal,
+        result.has_future_date,
+        date_reason,
+    ) = validate_dates(
+        detected_dates
+    )
+
+    if detected_dates:
+
+        result.event_date = format_date(
+            detected_dates[0]
+        )
+
+        if len(detected_dates) > 1:
+
+            result.event_end_date = format_date(
+                detected_dates[-1]
+            )
+
+    # --------------------------------------------------------
+    # Location
+    # --------------------------------------------------------
+
+    (
+        structured_location,
+        structured_venue,
+        structured_city,
+        structured_state,
+        structured_country,
+    ) = extract_location_from_structured(
+        structured_event
+    )
+
+    result.event_location = (
+        structured_location
+    )
+
+    result.event_venue = (
+        structured_venue
+    )
+
+    result.event_city = (
+        structured_city
+    )
+
+    result.event_state = (
+        structured_state
+    )
+
+    result.event_country = (
+        structured_country
+    )
+
+    result.location_source = (
+        "Schema.org/Event structured data"
+        if structured_location
+        else "Page content"
+    )
+
+    # --------------------------------------------------------
+    # Fallback location extraction
     # --------------------------------------------------------
 
     if not result.event_location:
 
-        (
-            location,
-            city,
-            state,
-            country,
-            location_source,
-        ) = extract_html_location(
-            soup
+        location_patterns = (
+            r"(?:where|location|venue)\s*[:\-]\s*"
+            r"([^|]{5,180})",
+            r"(?:address)\s*[:\-]\s*"
+            r"([^|]{5,180})",
         )
 
-        result.event_location = (
-            clean_location(
-                location
-            )
-        )
+        for pattern in location_patterns:
 
-        result.event_city = city
-        result.event_state = state
-        result.event_country = country
-
-        result.location_source = (
-            location_source
-        )
-
-    else:
-
-        result.event_location = (
-            clean_location(
-                result.event_location
-            )
-        )
-
-    # --------------------------------------------------------
-    # VENUE
-    # --------------------------------------------------------
-
-    if not result.event_venue:
-
-        result.event_venue = (
-            extract_html_venue(
-                soup
-            )
-        )
-
-    # --------------------------------------------------------
-    # TIME
-    # --------------------------------------------------------
-
-    if not result.event_time:
-
-        result.event_time = (
-            extract_time(
-                page_text
-            )
-        )
-
-    # --------------------------------------------------------
-    # ORGANIZER
-    # --------------------------------------------------------
-
-    if not result.event_organizer:
-
-        result.event_organizer = (
-            extract_organizer(
-                soup
-            )
-        )
-
-    # --------------------------------------------------------
-    # EVENT TYPE
-    # --------------------------------------------------------
-
-    if not result.event_type:
-
-        result.event_type = (
-            detect_event_type(
-                result.title,
+            match = re.search(
+                pattern,
                 page_text,
+                flags=re.IGNORECASE,
             )
-        )
+
+            if match:
+
+                candidate_location = clean_value(
+                    match.group(1)
+                )
+
+                # Avoid navigation garbage.
+                if (
+                    len(candidate_location) <= 180
+                    and not candidate_location.lower().startswith(
+                        (
+                            "skip to",
+                            "login",
+                            "sign in",
+                        )
+                    )
+                ):
+
+                    result.event_location = (
+                        candidate_location
+                    )
+
+                    result.location_source = (
+                        "Focused page content"
+                    )
+
+                    break
 
     # --------------------------------------------------------
-    # PRICE
+    # Event mode
     # --------------------------------------------------------
 
-    if not result.event_price:
-
-        result.event_price = (
-            extract_price(
-                page_text
-            )
-        )
-
-    # --------------------------------------------------------
-    # EVENT MODE
-    # --------------------------------------------------------
-
-    mode_text = (
-        f"{result.event_location} "
-        f"{result.event_type} "
-        f"{page_text}"
-    )
-
-    result.event_mode = (
-        detect_event_mode(
-            mode_text
-        )
+    result.event_mode = detect_event_mode(
+        combined_text,
+        structured_event,
+        result.event_location,
     )
 
     result.has_online_signal = (
@@ -3008,20 +2390,143 @@ def verify_event(
     )
 
     # --------------------------------------------------------
-    # REGISTRATION
+    # Location signal
+    # --------------------------------------------------------
+
+    result.has_location_signal = bool(
+        result.event_location
+        or result.event_city
+        or result.event_state
+        or result.event_country
+    )
+
+    # --------------------------------------------------------
+    # India validation
+    # --------------------------------------------------------
+
+    (
+        india_valid,
+        india_reason,
+    ) = detect_india_location(
+        result.event_location,
+        page_text,
+        result.event_mode,
+        result.event_country,
+    )
+
+    result.has_india_location = (
+        india_valid
+    )
+
+    result.is_india_event = (
+        india_valid
+    )
+
+    # --------------------------------------------------------
+    # Time
+    # --------------------------------------------------------
+
+    if structured_event.get(
+        "startDate"
+    ):
+
+        start_datetime = str(
+            structured_event.get(
+                "startDate"
+            )
+        )
+
+        time_match = re.search(
+            r"T(\d{1,2}:\d{2})",
+            start_datetime,
+        )
+
+        if time_match:
+
+            result.event_time = (
+                time_match.group(1)
+            )
+
+    if not result.event_time:
+
+        result.event_time = extract_time(
+            page_text
+        )
+
+    # --------------------------------------------------------
+    # Venue fallback
+    # --------------------------------------------------------
+
+    if not result.event_venue:
+
+        if (
+            result.event_location
+            and result.event_mode
+            != "Online"
+        ):
+
+            first_part = (
+                result.event_location.split(
+                    ","
+                )[0].strip()
+            )
+
+            if (
+                first_part
+                and len(first_part) <= 100
+            ):
+
+                result.event_venue = (
+                    first_part
+                )
+
+    # --------------------------------------------------------
+    # Organizer
+    # --------------------------------------------------------
+
+    result.event_organizer = (
+        extract_organizer(
+            page_text,
+            structured_event,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Event type
+    # --------------------------------------------------------
+
+    result.event_type = (
+        extract_event_type(
+            result.title,
+            page_text,
+            structured_event,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Price
+    # --------------------------------------------------------
+
+    result.event_price = (
+        extract_price(
+            page_text,
+            structured_event,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Registration
     # --------------------------------------------------------
 
     result.registration_url = (
         extract_registration_url(
             soup,
-            response.url,
+            final_url,
         )
     )
 
-    result.has_registration_signal = (
-        bool(
-            result.registration_url
-        )
+    result.has_registration_signal = bool(
+        result.registration_url
         or contains_keyword(
             page_text,
             REGISTRATION_KEYWORDS,
@@ -3029,101 +2534,82 @@ def verify_event(
     )
 
     # --------------------------------------------------------
-    # INDIA / INTERNATIONAL ONLINE RULE
+    # Event URL
     # --------------------------------------------------------
 
-    (
-        india_ok,
-        india_city,
-        india_state,
-        india_country,
-        india_reason,
-    ) = detect_india_location(
-        result.event_location,
-        page_text,
-        result.event_mode,
-    )
-
-    # Structured Indian city has priority.
-    if result.event_city:
-
-        structured_city, structured_state, structured_country = (
-            infer_indian_city(
-                result.event_city
-            )
+    result.event_url = (
+        extract_event_url(
+            structured_event,
+            final_url,
         )
-
-        if structured_city:
-
-            india_ok = True
-
-            india_city = (
-                structured_city
-            )
-
-            india_state = (
-                structured_state
-            )
-
-            india_country = (
-                structured_country
-            )
-
-    result.is_india_event = (
-        india_ok
-    )
-
-    result.has_india_location = (
-        india_ok
-    )
-
-    if india_ok:
-
-        if not result.event_city:
-
-            result.event_city = (
-                india_city
-            )
-
-        if not result.event_state:
-
-            result.event_state = (
-                india_state
-            )
-
-        if not result.event_country:
-
-            result.event_country = (
-                india_country
-            )
-
-    result.has_location_signal = bool(
-        result.event_location
     )
 
     # --------------------------------------------------------
-    # FINAL HARD VALIDATION
-    # --------------------------------------------------------
-    #
-    # ALL cybersecurity events:
-    #
-    # 1. Must actually be an event.
-    # 2. Must actually be cybersecurity-related.
-    # 3. Must have a verified current/future date.
-    # 4. Physical events must be in India.
-    # 5. Online/remote events can be international.
+    # Description
     # --------------------------------------------------------
 
-    if not result.is_event_page:
+    result.event_description = (
+        extract_description(
+            soup,
+            structured_event,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Final cybersecurity validation
+    # --------------------------------------------------------
+
+    # Require meaningful cybersecurity relevance.
+    cyber_keyword_hits = keyword_count(
+        (
+            f"{result.title} "
+            f"{result.event_description} "
+            f"{page_text[:12000]}"
+        ),
+        CYBER_KEYWORDS,
+    )
+
+    result.is_cyber_event = (
+        result.has_cyber_signal
+        and cyber_keyword_hits >= 1
+    )
+
+    # --------------------------------------------------------
+    # Final event-page validation
+    # --------------------------------------------------------
+
+    # A page should have multiple event indicators.
+    event_keyword_hits = keyword_count(
+        (
+            f"{result.title} "
+            f"{result.event_type} "
+            f"{page_text[:12000]}"
+        ),
+        EVENT_KEYWORDS,
+    )
+
+    result.is_event_page = (
+        result.has_event_signal
+        and (
+            event_keyword_hits >= 1
+            or result.structured_event_found
+        )
+    )
+
+    # --------------------------------------------------------
+    # Hard rejection rules
+    # --------------------------------------------------------
+
+    if not result.is_cyber_event:
 
         result.rejected_reason = (
-            "Not a recognizable event page"
+            "Not sufficiently related to cybersecurity"
         )
 
-    elif not result.is_cyber_event:
+    elif not result.is_event_page:
 
         result.rejected_reason = (
-            "Cybersecurity relevance not established"
+            "Page does not appear to be a real event page"
         )
 
     elif not result.has_date_signal:
@@ -3138,59 +2624,28 @@ def verify_event(
             "Event date is in the past"
         )
 
-    elif not result.is_india_event:
+    elif (
+        result.event_mode != "Online"
+        and not result.has_india_location
+    ):
 
         result.rejected_reason = (
-            f"Physical event outside India: "
-            f"{india_reason}"
+            india_reason
         )
 
     # --------------------------------------------------------
-    # SCORE
+    # Score
     # --------------------------------------------------------
 
-    score = 0
-
-    if result.reachable:
-        score += 5
-
-    if result.is_event_page:
-        score += 15
-
-    if result.is_cyber_event:
-        score += 25
-
-    if result.has_date_signal:
-        score += 10
-
-    if result.has_future_date:
-        score += 15
-
-    if result.is_india_event:
-        score += 20
-
-    if result.has_location_signal:
-        score += 5
-
-    if result.has_registration_signal:
-        score += 5
-
-    result.score = min(
-        score,
-        100,
+    result.score = calculate_score(
+        result
     )
 
     # --------------------------------------------------------
-    # HARD REJECTION CAPS SCORE
+    # Additional safety cap
     # --------------------------------------------------------
 
-    if (
-        not result.is_event_page
-        or not result.is_cyber_event
-        or not result.has_date_signal
-        or not result.has_future_date
-        or not result.is_india_event
-    ):
+    if result.rejected_reason:
 
         result.score = min(
             result.score,
@@ -3201,164 +2656,189 @@ def verify_event(
 
 
 # ============================================================
-# TODAY EVENT CHECK
+# TODAY CHECK
 # ============================================================
 
-def is_today_event(
+def event_is_today(
     result: VerificationResult,
 ) -> bool:
 
-    if not result:
+    if not result.detected_dates:
         return False
 
-    if not result.is_event_page:
+    today = today_india()
+
+    parsed_dates = []
+
+    for value in result.detected_dates:
+
+        parsed = parse_date(
+            value
+        )
+
+        if parsed:
+
+            parsed_dates.append(
+                parsed
+            )
+
+    if not parsed_dates:
         return False
 
-    if not result.is_cyber_event:
-        return False
+    if today in parsed_dates:
+        return True
 
-    if not result.is_india_event:
-        return False
-
-    if not result.has_date_signal:
-        return False
-
-    return event_is_today(
-        result.detected_dates
+    return (
+        min(parsed_dates)
+        <= today
+        <= max(parsed_dates)
     )
 
 
 # ============================================================
-# COMMAND-LINE TEST
+# CLI TEST
 # ============================================================
 
 if __name__ == "__main__":
 
     import sys
 
+    print()
+    print("=" * 70)
+    print("INDIA CYBERSECURITY EVENT VERIFIER")
+    print("=" * 70)
+
     if len(sys.argv) < 2:
 
+        print()
         print(
-            "Usage: "
-            "python verifier.py <event_url>"
+            "Usage:"
         )
 
-        raise SystemExit(1)
+        print(
+            "python verifier.py "
+            "https://example.com/event"
+        )
+
+        print()
+        print(
+            "No URL supplied."
+        )
+
+        raise SystemExit(0)
 
     test_url = sys.argv[1]
+
+    print()
+    print(
+        f"🔎 Testing: {test_url}"
+    )
+
+    print()
 
     result = verify_event(
         test_url
     )
 
-    print()
-    print("=" * 70)
-    print("INDIA CYBERSECURITY EVENT VERIFICATION")
-    print("=" * 70)
-
     print(
-        f"Reachable       : "
+        f"Reachable: "
         f"{result.reachable}"
     )
 
     print(
-        f"Title           : "
+        f"Title: "
         f"{result.title}"
     )
 
     print(
-        f"Event Page      : "
+        f"Event: "
         f"{result.is_event_page}"
     )
 
     print(
-        f"Cybersecurity   : "
+        f"Cybersecurity: "
         f"{result.is_cyber_event}"
     )
 
     print(
-        f"India/Allowed   : "
-        f"{result.is_india_event}"
-    )
-
-    print(
-        f"Date            : "
-        f"{result.event_date}"
-    )
-
-    print(
-        f"End Date        : "
-        f"{result.event_end_date}"
-    )
-
-    print(
-        f"Time            : "
-        f"{result.event_time}"
-    )
-
-    print(
-        f"Location        : "
-        f"{result.event_location}"
-    )
-
-    print(
-        f"Venue           : "
-        f"{result.event_venue}"
-    )
-
-    print(
-        f"City            : "
-        f"{result.event_city}"
-    )
-
-    print(
-        f"State           : "
-        f"{result.event_state}"
-    )
-
-    print(
-        f"Country         : "
-        f"{result.event_country}"
-    )
-
-    print(
-        f"Mode            : "
+        f"Mode: "
         f"{result.event_mode}"
     )
 
     print(
-        f"Organizer       : "
+        f"Date: "
+        f"{result.event_date}"
+    )
+
+    print(
+        f"End date: "
+        f"{result.event_end_date}"
+    )
+
+    print(
+        f"Time: "
+        f"{result.event_time}"
+    )
+
+    print(
+        f"Location: "
+        f"{result.event_location}"
+    )
+
+    print(
+        f"Venue: "
+        f"{result.event_venue}"
+    )
+
+    print(
+        f"City: "
+        f"{result.event_city}"
+    )
+
+    print(
+        f"State: "
+        f"{result.event_state}"
+    )
+
+    print(
+        f"Country: "
+        f"{result.event_country}"
+    )
+
+    print(
+        f"Organizer: "
         f"{result.event_organizer}"
     )
 
     print(
-        f"Type            : "
+        f"Type: "
         f"{result.event_type}"
     )
 
     print(
-        f"Price           : "
+        f"Price: "
         f"{result.event_price}"
     )
 
     print(
-        f"Registration    : "
+        f"Registration: "
         f"{result.registration_url}"
     )
 
     print(
-        f"Structured      : "
-        f"{result.structured_event_found}"
-    )
-
-    print(
-        f"Score           : "
+        f"Score: "
         f"{result.score}/100"
     )
 
     print(
-        f"Rejected Reason : "
+        f"Today: "
+        f"{event_is_today(result)}"
+    )
+
+    print(
+        f"Rejected reason: "
         f"{result.rejected_reason}"
     )
 
+    print()
     print("=" * 70)
