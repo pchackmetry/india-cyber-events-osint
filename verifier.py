@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import re
-import requests
-
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+import requests
 from bs4 import BeautifulSoup
 
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 HEADERS = {
     "User-Agent": (
@@ -17,6 +22,8 @@ HEADERS = {
 }
 
 TIMEOUT = 20
+
+INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
 # ============================================================
@@ -134,9 +141,11 @@ class VerificationResult:
     has_registration_signal: bool
     has_date_signal: bool
     has_future_date: bool
+
     has_location_signal: bool
     has_india_location: bool
     has_online_signal: bool
+
     has_cyber_signal: bool
     has_event_signal: bool
 
@@ -148,6 +157,7 @@ class VerificationResult:
 # ============================================================
 
 def fetch_page(url: str) -> str | None:
+    """Fetch webpage HTML."""
 
     try:
         response = requests.get(
@@ -189,13 +199,13 @@ def fetch_page(url: str) -> str | None:
 def extract_page_content(
     html: str,
 ) -> tuple[str, str]:
+    """Extract title and visible text."""
 
     soup = BeautifulSoup(
         html,
         "lxml",
     )
 
-    # Remove unnecessary elements.
     for element in soup(
         [
             "script",
@@ -219,7 +229,6 @@ def extract_page_content(
         strip=True,
     )
 
-    # Normalize whitespace.
     text = re.sub(
         r"\s+",
         " ",
@@ -237,6 +246,7 @@ def contains_keyword(
     text: str,
     keywords: list[str],
 ) -> bool:
+    """Check whether any keyword exists in text."""
 
     text_lower = text.lower()
 
@@ -253,51 +263,223 @@ def contains_keyword(
 def extract_dates(
     text: str,
 ) -> list[str]:
+    """
+    Extract common event date formats.
 
-    patterns = [
-        # 3 September 2026
-        r"\b\d{1,2}\s+"
-        r"(?:January|February|March|April|May|June|July|"
+    Supported examples:
+
+    4 September 2026
+    04 September 2026
+    4 Sep 2026
+    September 4, 2026
+    Sep 4, 2026
+    04/09/2026
+    04-09-2026
+    2026-09-04
+
+    Multi-day examples:
+
+    4-5 September 2026
+    September 4-5, 2026
+    """
+
+    matches: list[str] = []
+
+    # --------------------------------------------------------
+    # Multi-day: 4-5 September 2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"(\d{1,2})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(January|February|March|April|May|June|July|"
         r"August|September|October|November|December)"
-        r"\s+\d{4}\b",
+        r"\s+"
+        r"(\d{4})"
+        r"\b",
+        re.IGNORECASE,
+    )
 
-        # September 3, 2026
-        r"\b(?:January|February|March|April|May|June|July|"
-        r"August|September|October|November|December)"
-        r"\s+\d{1,2},\s+\d{4}\b",
+    for match in pattern.finditer(text):
+        start_day = match.group(1)
+        end_day = match.group(2)
+        month = match.group(3)
+        year = match.group(4)
 
-        # 03/09/2026 or 03-09-2026
-        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b",
-
-        # 2026-09-03
-        r"\b\d{4}-\d{2}-\d{2}\b",
-
-        # Sep 3 2026
-        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-        r"[a-z]*\s+\d{1,2},?\s+\d{4}\b",
-    ]
-
-    matches = []
-
-    for pattern in patterns:
-
-        found = re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
+        matches.append(
+            f"{start_day} {month} {year}"
         )
 
-        matches.extend(found)
+        matches.append(
+            f"{end_day} {month} {year}"
+        )
 
-    # Remove duplicates.
-    unique = []
+    # --------------------------------------------------------
+    # Multi-day: September 4-5, 2026
+    # --------------------------------------------------------
 
-    for date_text in matches:
+    pattern = re.compile(
+        r"\b"
+        r"(January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r",\s*"
+        r"(\d{4})"
+        r"\b",
+        re.IGNORECASE,
+    )
 
-        if date_text not in unique:
-            unique.append(date_text)
+    for match in pattern.finditer(text):
+        month = match.group(1)
+        start_day = match.group(2)
+        end_day = match.group(3)
+        year = match.group(4)
 
-    return unique
+        matches.append(
+            f"{start_day} {month} {year}"
+        )
+
+        matches.append(
+            f"{end_day} {month} {year}"
+        )
+
+    # --------------------------------------------------------
+    # Full month: 4 September 2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"\d{1,2}"
+        r"\s+"
+        r"(January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)"
+        r"\s+"
+        r"\d{4}"
+        r"\b",
+        re.IGNORECASE,
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # Full month: September 4, 2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"(January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)"
+        r"\s+"
+        r"\d{1,2}"
+        r",\s*"
+        r"\d{4}"
+        r"\b",
+        re.IGNORECASE,
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # Short month: 4 Sep 2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"\d{1,2}"
+        r"\s+"
+        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        r"[a-z]*"
+        r"\s+"
+        r"\d{4}"
+        r"\b",
+        re.IGNORECASE,
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # Short month: Sep 4, 2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        r"[a-z]*"
+        r"\s+"
+        r"\d{1,2}"
+        r",?\s+"
+        r"\d{4}"
+        r"\b",
+        re.IGNORECASE,
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # Numeric: 04/09/2026 or 04-09-2026
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"\d{1,2}"
+        r"[/-]"
+        r"\d{1,2}"
+        r"[/-]"
+        r"\d{4}"
+        r"\b"
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # ISO: 2026-09-04
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"\b"
+        r"\d{4}-\d{2}-\d{2}"
+        r"\b"
+    )
+
+    matches.extend(
+        match.group(0)
+        for match in pattern.finditer(text)
+    )
+
+    # --------------------------------------------------------
+    # Remove duplicates
+    # --------------------------------------------------------
+
+    unique_dates: list[str] = []
+
+    for value in matches:
+        value = value.strip()
+
+        if value and value not in unique_dates:
+            unique_dates.append(value)
+
+    return unique_dates
 
 
 # ============================================================
@@ -306,29 +488,29 @@ def extract_dates(
 
 def parse_date(
     date_text: str,
-) -> datetime | None:
+) -> date | None:
+    """Convert detected date text into a date object."""
+
+    cleaned = date_text.strip()
 
     formats = [
         "%d %B %Y",
+        "%d %b %Y",
         "%B %d, %Y",
+        "%b %d, %Y",
+        "%B %d %Y",
+        "%b %d %Y",
         "%d/%m/%Y",
         "%d-%m-%Y",
         "%Y-%m-%d",
-        "%b %d %Y",
-        "%b %d, %Y",
     ]
 
     for fmt in formats:
-
         try:
-            parsed = datetime.strptime(
-                date_text,
+            return datetime.strptime(
+                cleaned,
                 fmt,
-            )
-
-            return parsed.replace(
-                tzinfo=timezone.utc
-            )
+            ).date()
 
         except ValueError:
             continue
@@ -337,24 +519,60 @@ def parse_date(
 
 
 # ============================================================
-# FUTURE DATE CHECK
+# GET INDIA TODAY
+# ============================================================
+
+def get_india_today() -> date:
+    """Return today's date using India timezone."""
+
+    return datetime.now(
+        INDIA_TIMEZONE
+    ).date()
+
+
+# ============================================================
+# EVENT IS TODAY
+# ============================================================
+
+def event_is_today(
+    detected_dates: list[str],
+) -> bool:
+    """
+    Return True if at least one detected event date
+    is today in India.
+    """
+
+    today = get_india_today()
+
+    for date_text in detected_dates:
+        parsed = parse_date(date_text)
+
+        if parsed == today:
+            return True
+
+    return False
+
+
+# ============================================================
+# EVENT IS FUTURE
 # ============================================================
 
 def has_future_date(
     detected_dates: list[str],
 ) -> bool:
+    """
+    Return True if the event has a date today or later.
 
-    now = datetime.now(
-        timezone.utc
-    )
+    This is retained for compatibility with the existing
+    verification scoring system.
+    """
+
+    today = get_india_today()
 
     for date_text in detected_dates:
+        parsed = parse_date(date_text)
 
-        parsed = parse_date(
-            date_text
-        )
-
-        if parsed and parsed.date() >= now.date():
+        if parsed is not None and parsed >= today:
             return True
 
     return False
@@ -367,6 +585,7 @@ def has_future_date(
 def location_signals(
     text: str,
 ) -> tuple[bool, bool, bool]:
+    """Detect India and online location signals."""
 
     text_lower = text.lower()
 
@@ -395,6 +614,7 @@ def registration_signal(
     soup: BeautifulSoup,
     text: str,
 ) -> bool:
+    """Detect event registration signals."""
 
     text_lower = text.lower()
 
@@ -408,7 +628,6 @@ def registration_signal(
         "a",
         href=True,
     ):
-
         link_text = link.get_text(
             " ",
             strip=True,
@@ -439,6 +658,7 @@ def registration_signal(
 def verify_event(
     url: str,
 ) -> VerificationResult:
+    """Fetch and verify an event webpage."""
 
     print(
         f"   🔎 Verifying: {url}"
@@ -447,7 +667,6 @@ def verify_event(
     html = fetch_page(url)
 
     if not html:
-
         return VerificationResult(
             reachable=False,
             title="",
@@ -480,24 +699,30 @@ def verify_event(
         detected_dates
     )
 
+    today_event = event_is_today(
+        detected_dates
+    )
+
     has_location, has_india, has_online = (
         location_signals(text)
     )
 
-    has_registration = (
-        registration_signal(
-            soup,
-            text,
-        )
+    has_registration = registration_signal(
+        soup,
+        text,
+    )
+
+    combined_text = (
+        f"{title} {text}"
     )
 
     has_cyber = contains_keyword(
-        f"{title} {text}",
+        combined_text,
         CYBER_KEYWORDS,
     )
 
     has_event = contains_keyword(
-        f"{title} {text}",
+        combined_text,
         EVENT_KEYWORDS,
     )
 
@@ -506,9 +731,7 @@ def verify_event(
         title=title,
         text=text,
         has_registration_signal=has_registration,
-        has_date_signal=bool(
-            detected_dates
-        ),
+        has_date_signal=bool(detected_dates),
         has_future_date=future_date,
         has_location_signal=has_location,
         has_india_location=has_india,
@@ -536,7 +759,22 @@ def verify_event(
     )
 
     print(
-        f"   Future date: "
+        f"   Detected dates: "
+        f"{detected_dates}"
+    )
+
+    print(
+        f"   India today: "
+        f"{get_india_today()}"
+    )
+
+    print(
+        f"   Event TODAY: "
+        f"{today_event}"
+    )
+
+    print(
+        f"   Future/today date: "
         f"{future_date}"
     )
 
@@ -565,33 +803,34 @@ def verify_event(
 def verification_score(
     result: VerificationResult,
 ) -> int:
+    """Calculate event verification score."""
 
     if not result.reachable:
         return 0
 
     score = 0
 
-    # Cybersecurity relevance.
+    # Cybersecurity relevance
     if result.has_cyber_signal:
         score += 20
 
-    # Event relevance.
+    # Event relevance
     if result.has_event_signal:
         score += 15
 
-    # Actual date exists.
+    # Date exists
     if result.has_date_signal:
         score += 10
 
-    # Date is future.
+    # Today or future
     if result.has_future_date:
         score += 25
 
-    # India location or online.
+    # India or online
     if result.has_location_signal:
         score += 15
 
-    # Registration.
+    # Registration
     if result.has_registration_signal:
         score += 15
 
@@ -606,6 +845,47 @@ def verification_score(
 # ============================================================
 
 if __name__ == "__main__":
+
+    print("=" * 60)
+    print("🇮🇳 VERIFIER TEST")
+    print("=" * 60)
+
+    print(
+        f"India date: "
+        f"{get_india_today()}"
+    )
+
+    print()
+
+    test_dates = [
+        "4 September 2026",
+        "5 September 2026",
+        "04/09/2026",
+        "2026-09-04",
+        "4 Sep 2026",
+        "September 4, 2026",
+    ]
+
+    for test_date in test_dates:
+
+        parsed = parse_date(
+            test_date
+        )
+
+        today = (
+            parsed == get_india_today()
+            if parsed
+            else False
+        )
+
+        print(
+            f"{test_date:25} "
+            f"→ {parsed} "
+            f"→ TODAY={today}"
+        )
+
+    print()
+    print("=" * 60)
 
     test_url = (
         "https://owasp.org/events/"
