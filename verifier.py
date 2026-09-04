@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -13,119 +13,8 @@ from bs4 import BeautifulSoup
 # CONFIGURATION
 # ============================================================
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/140.0 Safari/537.36"
-    )
-}
-
 TIMEOUT = 20
-
 INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
-
-
-# ============================================================
-# KEYWORDS
-# ============================================================
-
-CYBER_KEYWORDS = [
-    "cybersecurity",
-    "cyber security",
-    "information security",
-    "infosec",
-    "application security",
-    "appsec",
-    "cloud security",
-    "ai security",
-    "network security",
-    "penetration testing",
-    "pentesting",
-    "ethical hacking",
-    "vapt",
-    "vulnerability",
-    "bug bounty",
-    "digital forensics",
-    "dfir",
-    "incident response",
-    "threat intelligence",
-    "malware",
-    "osint",
-    "soc",
-    "blue team",
-    "red team",
-    "grc",
-    "iam",
-    "identity security",
-    "ctf",
-    "capture the flag",
-    "security operations",
-]
-
-
-EVENT_KEYWORDS = [
-    "event",
-    "meetup",
-    "conference",
-    "workshop",
-    "webinar",
-    "summit",
-    "training",
-    "seminar",
-    "networking",
-    "community",
-    "ctf",
-    "hackathon",
-]
-
-
-INDIA_LOCATIONS = [
-    "india",
-    "hyderabad",
-    "bengaluru",
-    "bangalore",
-    "mumbai",
-    "pune",
-    "chennai",
-    "delhi",
-    "gurugram",
-    "gurgaon",
-    "noida",
-    "kolkata",
-    "kochi",
-    "ahmedabad",
-    "jaipur",
-    "chandigarh",
-    "bhubaneswar",
-    "lucknow",
-    "indore",
-    "coimbatore",
-    "visakhapatnam",
-]
-
-
-ONLINE_KEYWORDS = [
-    "online",
-    "virtual",
-    "remote",
-    "zoom",
-    "webinar",
-    "virtual event",
-]
-
-
-REGISTRATION_KEYWORDS = [
-    "register",
-    "registration",
-    "rsvp",
-    "tickets",
-    "book now",
-    "sign up",
-    "join event",
-    "attend",
-    "reserve",
-]
 
 
 # ============================================================
@@ -134,501 +23,726 @@ REGISTRATION_KEYWORDS = [
 
 @dataclass
 class VerificationResult:
-    reachable: bool
-    title: str
-    text: str
+    reachable: bool = False
 
-    has_registration_signal: bool
-    has_date_signal: bool
-    has_future_date: bool
+    title: str = ""
+    text: str = ""
 
-    has_location_signal: bool
-    has_india_location: bool
-    has_online_signal: bool
+    # Verification signals
+    has_registration_signal: bool = False
+    has_date_signal: bool = False
+    has_future_date: bool = False
+    has_location_signal: bool = False
+    has_india_location: bool = False
+    has_online_signal: bool = False
+    has_cyber_signal: bool = False
+    has_event_signal: bool = False
 
-    has_cyber_signal: bool
-    has_event_signal: bool
+    # Date information
+    detected_dates: list[str] = field(default_factory=list)
+    event_date: str = ""
+    event_end_date: str = ""
 
-    detected_dates: list[str]
+    # Rich event information
+    event_time: str = ""
+    event_location: str = ""
+    event_venue: str = ""
+    event_city: str = ""
+    event_state: str = ""
+    event_country: str = ""
+    event_mode: str = ""
+    event_organizer: str = ""
+    event_type: str = ""
+    event_price: str = ""
 
+    # URLs
+    registration_url: str = ""
+    event_url: str = ""
 
-# ============================================================
-# FETCH PAGE
-# ============================================================
-
-def fetch_page(url: str) -> str | None:
-    """Fetch webpage HTML."""
-
-    try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=TIMEOUT,
-            allow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            print(
-                f"   ❌ HTTP {response.status_code}"
-            )
-            return None
-
-        if not response.text:
-            print("   ❌ Empty page")
-            return None
-
-        return response.text
-
-    except requests.RequestException as exc:
-        print(
-            f"   ❌ Request error: {exc}"
-        )
-        return None
-
-    except Exception as exc:
-        print(
-            f"   ❌ Unexpected error: {exc}"
-        )
-        return None
+    # Description
+    event_description: str = ""
 
 
 # ============================================================
-# EXTRACT PAGE CONTENT
+# KEYWORDS
 # ============================================================
 
-def extract_page_content(
-    html: str,
-) -> tuple[str, str]:
-    """Extract title and visible text."""
-
-    soup = BeautifulSoup(
-        html,
-        "lxml",
-    )
-
-    for element in soup(
-        [
-            "script",
-            "style",
-            "noscript",
-            "svg",
-        ]
-    ):
-        element.decompose()
-
-    title = ""
-
-    if soup.title:
-        title = soup.title.get_text(
-            " ",
-            strip=True,
-        )
-
-    text = soup.get_text(
-        " ",
-        strip=True,
-    )
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text,
-    )
-
-    return title, text
+CYBER_KEYWORDS = (
+    "cybersecurity",
+    "cyber security",
+    "information security",
+    "infosec",
+    "application security",
+    "appsec",
+    "network security",
+    "cloud security",
+    "security operations",
+    "soc",
+    "penetration testing",
+    "penetration test",
+    "ethical hacking",
+    "ethical hacker",
+    "vulnerability",
+    "vulnerabilities",
+    "vapt",
+    "bug bounty",
+    "threat intelligence",
+    "incident response",
+    "digital forensics",
+    "forensics",
+    "malware",
+    "ransomware",
+    "zero trust",
+    "identity security",
+    "iam",
+    "devsecops",
+    "secure coding",
+    "data security",
+    "privacy",
+    "grc",
+    "risk management",
+    "compliance",
+    "security conference",
+)
 
 
-# ============================================================
-# KEYWORD CHECK
-# ============================================================
+EVENT_KEYWORDS = (
+    "conference",
+    "summit",
+    "webinar",
+    "workshop",
+    "meetup",
+    "training",
+    "bootcamp",
+    "hackathon",
+    "seminar",
+    "symposium",
+    "event",
+    "forum",
+    "expo",
+    "competition",
+    "challenge",
+)
 
-def contains_keyword(
-    text: str,
-    keywords: list[str],
-) -> bool:
-    """Check whether any keyword exists in text."""
 
-    text_lower = text.lower()
+INDIA_KEYWORDS = (
+    "india",
+    "indian",
+    "hyderabad",
+    "bangalore",
+    "bengaluru",
+    "chennai",
+    "mumbai",
+    "pune",
+    "delhi",
+    "new delhi",
+    "gurgaon",
+    "gurugram",
+    "noida",
+    "kolkata",
+    "ahmedabad",
+    "jaipur",
+    "kochi",
+    "coimbatore",
+    "thiruvananthapuram",
+    "telangana",
+    "karnataka",
+    "tamil nadu",
+    "maharashtra",
+    "kerala",
+    "gujarat",
+    "rajasthan",
+    "uttar pradesh",
+    "virtual",
+    "online",
+)
 
-    return any(
-        keyword in text_lower
-        for keyword in keywords
-    )
 
-
-# ============================================================
-# DATE EXTRACTION
-# ============================================================
-
-def extract_dates(
-    text: str,
-) -> list[str]:
-    """
-    Extract common event date formats.
-
-    Supported examples:
-
-    4 September 2026
-    04 September 2026
-    4 Sep 2026
-    September 4, 2026
-    Sep 4, 2026
-    04/09/2026
-    04-09-2026
-    2026-09-04
-
-    Multi-day examples:
-
-    4-5 September 2026
-    September 4-5, 2026
-    """
-
-    matches: list[str] = []
-
-    # --------------------------------------------------------
-    # Multi-day: 4-5 September 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"(\d{1,2})"
-        r"\s*-\s*"
-        r"(\d{1,2})"
-        r"\s+"
-        r"(January|February|March|April|May|June|July|"
-        r"August|September|October|November|December)"
-        r"\s+"
-        r"(\d{4})"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    for match in pattern.finditer(text):
-        start_day = match.group(1)
-        end_day = match.group(2)
-        month = match.group(3)
-        year = match.group(4)
-
-        matches.append(
-            f"{start_day} {month} {year}"
-        )
-
-        matches.append(
-            f"{end_day} {month} {year}"
-        )
-
-    # --------------------------------------------------------
-    # Multi-day: September 4-5, 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"(January|February|March|April|May|June|July|"
-        r"August|September|October|November|December)"
-        r"\s+"
-        r"(\d{1,2})"
-        r"\s*-\s*"
-        r"(\d{1,2})"
-        r",\s*"
-        r"(\d{4})"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    for match in pattern.finditer(text):
-        month = match.group(1)
-        start_day = match.group(2)
-        end_day = match.group(3)
-        year = match.group(4)
-
-        matches.append(
-            f"{start_day} {month} {year}"
-        )
-
-        matches.append(
-            f"{end_day} {month} {year}"
-        )
-
-    # --------------------------------------------------------
-    # Full month: 4 September 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"\d{1,2}"
-        r"\s+"
-        r"(January|February|March|April|May|June|July|"
-        r"August|September|October|November|December)"
-        r"\s+"
-        r"\d{4}"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # Full month: September 4, 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"(January|February|March|April|May|June|July|"
-        r"August|September|October|November|December)"
-        r"\s+"
-        r"\d{1,2}"
-        r",\s*"
-        r"\d{4}"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # Short month: 4 Sep 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"\d{1,2}"
-        r"\s+"
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-        r"[a-z]*"
-        r"\s+"
-        r"\d{4}"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # Short month: Sep 4, 2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-        r"[a-z]*"
-        r"\s+"
-        r"\d{1,2}"
-        r",?\s+"
-        r"\d{4}"
-        r"\b",
-        re.IGNORECASE,
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # Numeric: 04/09/2026 or 04-09-2026
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"\d{1,2}"
-        r"[/-]"
-        r"\d{1,2}"
-        r"[/-]"
-        r"\d{4}"
-        r"\b"
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # ISO: 2026-09-04
-    # --------------------------------------------------------
-
-    pattern = re.compile(
-        r"\b"
-        r"\d{4}-\d{2}-\d{2}"
-        r"\b"
-    )
-
-    matches.extend(
-        match.group(0)
-        for match in pattern.finditer(text)
-    )
-
-    # --------------------------------------------------------
-    # Remove duplicates
-    # --------------------------------------------------------
-
-    unique_dates: list[str] = []
-
-    for value in matches:
-        value = value.strip()
-
-        if value and value not in unique_dates:
-            unique_dates.append(value)
-
-    return unique_dates
+LOCATION_KEYWORDS = (
+    "hyderabad",
+    "bangalore",
+    "bengaluru",
+    "chennai",
+    "mumbai",
+    "pune",
+    "delhi",
+    "new delhi",
+    "gurgaon",
+    "gurugram",
+    "noida",
+    "kolkata",
+    "ahmedabad",
+    "jaipur",
+    "kochi",
+    "india",
+    "telangana",
+    "karnataka",
+    "tamil nadu",
+    "maharashtra",
+    "kerala",
+    "virtual",
+    "online",
+    "remote",
+)
 
 
 # ============================================================
-# PARSE DATE
+# DATE PARSING
 # ============================================================
 
-def parse_date(
-    date_text: str,
-) -> date | None:
-    """Convert detected date text into a date object."""
+DATE_PATTERNS = (
+    # 21 September 2026
+    r"\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+\d{4}\b",
 
-    cleaned = date_text.strip()
+    # September 21, 2026
+    r"\b(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+\d{1,2},\s+\d{4}\b",
 
-    formats = [
+    # 21 Sep 2026
+    r"\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    r"\s+\d{4}\b",
+
+    # Sep 21, 2026
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    r"\s+\d{1,2},\s+\d{4}\b",
+
+    # 21/09/2026
+    r"\b\d{1,2}/\d{1,2}/\d{4}\b",
+
+    # 21-09-2026
+    r"\b\d{1,2}-\d{1,2}-\d{4}\b",
+
+    # 2026-09-21
+    r"\b\d{4}-\d{1,2}-\d{1,2}\b",
+)
+
+
+def parse_date(value: str) -> date | None:
+    """Parse a supported date string."""
+
+    value = value.strip()
+
+    formats = (
         "%d %B %Y",
-        "%d %b %Y",
         "%B %d, %Y",
-        "%b %d, %Y",
         "%B %d %Y",
+        "%d %b %Y",
+        "%b %d, %Y",
         "%b %d %Y",
         "%d/%m/%Y",
         "%d-%m-%Y",
         "%Y-%m-%d",
-    ]
+        "%Y/%m/%d",
+    )
 
     for fmt in formats:
         try:
-            return datetime.strptime(
-                cleaned,
-                fmt,
-            ).date()
-
+            return datetime.strptime(value, fmt).date()
         except ValueError:
             continue
 
     return None
 
 
+def _expand_date_range(match: str) -> list[str]:
+    """
+    Convert common date ranges into individual date strings.
+
+    Examples:
+        4-5 September 2026
+        September 4-5, 2026
+    """
+
+    results = []
+
+    # 4-5 September 2026
+    pattern1 = re.search(
+        r"\b(\d{1,2})\s*[-–]\s*(\d{1,2})\s+"
+        r"(January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\s+(\d{4})\b",
+        match,
+        re.IGNORECASE,
+    )
+
+    if pattern1:
+        start_day = int(pattern1.group(1))
+        end_day = int(pattern1.group(2))
+        month = pattern1.group(3)
+        year = int(pattern1.group(4))
+
+        for day_number in range(start_day, end_day + 1):
+            results.append(
+                f"{day_number} {month} {year}"
+            )
+
+        return results
+
+    # September 4-5, 2026
+    pattern2 = re.search(
+        r"\b(January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\s+"
+        r"(\d{1,2})\s*[-–]\s*(\d{1,2}),\s*(\d{4})\b",
+        match,
+        re.IGNORECASE,
+    )
+
+    if pattern2:
+        month = pattern2.group(1)
+        start_day = int(pattern2.group(2))
+        end_day = int(pattern2.group(3))
+        year = int(pattern2.group(4))
+
+        for day_number in range(start_day, end_day + 1):
+            results.append(
+                f"{month} {day_number}, {year}"
+            )
+
+        return results
+
+    return [match]
+
+
+def extract_dates(text: str) -> list[str]:
+    """Extract unique event dates from page text."""
+
+    found = []
+
+    # Search ranges first
+    range_patterns = (
+        r"\b\d{1,2}\s*[-–]\s*\d{1,2}\s+"
+        r"(?:January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\s+\d{4}\b",
+
+        r"\b(?:January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\s+"
+        r"\d{1,2}\s*[-–]\s*\d{1,2},\s*\d{4}\b",
+    )
+
+    for pattern in range_patterns:
+        matches = re.findall(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        for match in matches:
+            found.extend(
+                _expand_date_range(match)
+            )
+
+    # Search individual dates
+    for pattern in DATE_PATTERNS:
+        matches = re.findall(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        for match in matches:
+            if isinstance(match, tuple):
+                continue
+
+            found.append(match)
+
+    # Remove invalid dates and duplicates
+    result = []
+
+    for value in found:
+        if parse_date(value) is None:
+            continue
+
+        if value not in result:
+            result.append(value)
+
+    return result
+
+
 # ============================================================
-# GET INDIA TODAY
+# TODAY FILTER
 # ============================================================
 
-def get_india_today() -> date:
-    """Return today's date using India timezone."""
+def event_is_today(detected_dates: list[str]) -> bool:
+    """
+    Return True when the event is happening today in India.
 
-    return datetime.now(
+    Examples:
+
+    Today:
+        True
+
+    Tomorrow:
+        False
+
+    Yesterday:
+        False
+
+    Multi-day event containing today:
+        True
+
+    Unknown date:
+        False
+    """
+
+    today = datetime.now(
         INDIA_TIMEZONE
     ).date()
 
+    parsed_dates = []
 
-# ============================================================
-# EVENT IS TODAY
-# ============================================================
+    for value in detected_dates:
 
-def event_is_today(
-    detected_dates: list[str],
-) -> bool:
-    """
-    Return True if at least one detected event date
-    is today in India.
-    """
+        parsed = parse_date(value)
 
-    today = get_india_today()
+        if parsed:
+            parsed_dates.append(parsed)
 
-    for date_text in detected_dates:
-        parsed = parse_date(date_text)
+    if not parsed_dates:
+        return False
 
-        if parsed == today:
-            return True
-
-    return False
-
-
-# ============================================================
-# EVENT IS FUTURE
-# ============================================================
-
-def has_future_date(
-    detected_dates: list[str],
-) -> bool:
-    """
-    Return True if the event has a date today or later.
-
-    This is retained for compatibility with the existing
-    verification scoring system.
-    """
-
-    today = get_india_today()
-
-    for date_text in detected_dates:
-        parsed = parse_date(date_text)
-
-        if parsed is not None and parsed >= today:
-            return True
-
-    return False
-
-
-# ============================================================
-# LOCATION CHECK
-# ============================================================
-
-def location_signals(
-    text: str,
-) -> tuple[bool, bool, bool]:
-    """Detect India and online location signals."""
-
-    text_lower = text.lower()
-
-    has_india = any(
-        location in text_lower
-        for location in INDIA_LOCATIONS
-    )
-
-    has_online = any(
-        keyword in text_lower
-        for keyword in ONLINE_KEYWORDS
-    )
-
-    return (
-        has_india or has_online,
-        has_india,
-        has_online,
-    )
-
-
-# ============================================================
-# REGISTRATION CHECK
-# ============================================================
-
-def registration_signal(
-    soup: BeautifulSoup,
-    text: str,
-) -> bool:
-    """Detect event registration signals."""
-
-    text_lower = text.lower()
-
-    if any(
-        keyword in text_lower
-        for keyword in REGISTRATION_KEYWORDS
-    ):
+    if today in parsed_dates:
         return True
+
+    earliest = min(parsed_dates)
+    latest = max(parsed_dates)
+
+    return earliest <= today <= latest
+
+
+# ============================================================
+# TEXT SIGNALS
+# ============================================================
+
+def contains_keyword(
+    text: str,
+    keywords: tuple[str, ...],
+) -> bool:
+
+    lowered = text.lower()
+
+    return any(
+        keyword.lower() in lowered
+        for keyword in keywords
+    )
+
+
+def detect_event_type(text: str) -> str:
+
+    lowered = text.lower()
+
+    mapping = (
+        ("conference", "Conference"),
+        ("summit", "Summit"),
+        ("webinar", "Webinar"),
+        ("workshop", "Workshop"),
+        ("meetup", "Meetup"),
+        ("hackathon", "Hackathon"),
+        ("bootcamp", "Bootcamp"),
+        ("training", "Training"),
+        ("seminar", "Seminar"),
+        ("symposium", "Symposium"),
+        ("expo", "Expo"),
+        ("forum", "Forum"),
+        ("competition", "Competition"),
+        ("challenge", "Challenge"),
+    )
+
+    for keyword, label in mapping:
+
+        if keyword in lowered:
+            return label
+
+    return ""
+
+
+def detect_event_mode(text: str) -> str:
+
+    lowered = text.lower()
+
+    online = any(
+        value in lowered
+        for value in (
+            "online",
+            "virtual",
+            "remote",
+            "zoom",
+            "webex",
+            "microsoft teams",
+            "google meet",
+        )
+    )
+
+    offline = any(
+        value in lowered
+        for value in (
+            "in person",
+            "in-person",
+            "onsite",
+            "on-site",
+            "venue",
+            "hall",
+            "hotel",
+            "convention centre",
+            "convention center",
+        )
+    )
+
+    if online and offline:
+        return "Hybrid"
+
+    if online:
+        return "Online"
+
+    if offline:
+        return "Offline"
+
+    return ""
+
+
+# ============================================================
+# LOCATION EXTRACTION
+# ============================================================
+
+def clean_value(value: str) -> str:
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
+
+    return value.strip(
+        " \t\r\n:|-–—"
+    )
+
+
+def extract_location(text: str) -> str:
+
+    patterns = (
+        r"(?:location|venue|where)\s*[:\-]\s*"
+        r"([^\n|]{3,150})",
+
+        r"(?:held at|hosted at|located at)\s+"
+        r"([^\n|]{3,150})",
+    )
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+
+            value = clean_value(
+                match.group(1)
+            )
+
+            if value:
+                return value
+
+    # Try well-known Indian cities
+    cities = (
+        "Hyderabad",
+        "Bangalore",
+        "Bengaluru",
+        "Chennai",
+        "Mumbai",
+        "Pune",
+        "New Delhi",
+        "Delhi",
+        "Gurgaon",
+        "Gurugram",
+        "Noida",
+        "Kolkata",
+        "Ahmedabad",
+        "Jaipur",
+        "Kochi",
+    )
+
+    for city in cities:
+
+        if re.search(
+            rf"\b{re.escape(city)}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+
+            return city
+
+    # Online event
+    if re.search(
+        r"\b(virtual|online|remote)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "Online / Virtual"
+
+    return ""
+
+
+def extract_venue(text: str) -> str:
+
+    patterns = (
+        r"(?:venue)\s*[:\-]\s*([^\n|]{3,150})",
+
+        r"(?:venue name)\s*[:\-]\s*([^\n|]{3,150})",
+
+        r"(?:at|@)\s+"
+        r"([A-Z][A-Za-z0-9&' .,\-]{3,100})",
+    )
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+
+            value = clean_value(
+                match.group(1)
+            )
+
+            if value:
+                return value
+
+    return ""
+
+
+# ============================================================
+# ORGANIZER EXTRACTION
+# ============================================================
+
+def extract_organizer(text: str) -> str:
+
+    patterns = (
+        r"(?:organizer|organiser)\s*[:\-]\s*"
+        r"([^\n|]{3,150})",
+
+        r"(?:organized by|organised by)\s+"
+        r"([^\n|]{3,150})",
+
+        r"(?:hosted by)\s+"
+        r"([^\n|]{3,150})",
+    )
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+
+            value = clean_value(
+                match.group(1)
+            )
+
+            if value:
+                return value
+
+    return ""
+
+
+# ============================================================
+# TIME EXTRACTION
+# ============================================================
+
+def extract_time(text: str) -> str:
+
+    patterns = (
+        # 10:00 AM - 5:00 PM
+        r"\b\d{1,2}:\d{2}\s*(?:AM|PM)"
+        r"\s*[-–—]\s*"
+        r"\d{1,2}:\d{2}\s*(?:AM|PM)\b",
+
+        # 10 AM - 5 PM
+        r"\b\d{1,2}\s*(?:AM|PM)"
+        r"\s*[-–—]\s*"
+        r"\d{1,2}\s*(?:AM|PM)\b",
+
+        # 10:00 AM
+        r"\b\d{1,2}:\d{2}\s*(?:AM|PM)\b",
+
+        # 10 AM
+        r"\b\d{1,2}\s*(?:AM|PM)\b",
+    )
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            return clean_value(
+                match.group(0)
+            )
+
+    return ""
+
+
+# ============================================================
+# PRICE EXTRACTION
+# ============================================================
+
+def extract_price(text: str) -> str:
+
+    patterns = (
+        r"(?:price|fee|fees|registration fee|ticket)"
+        r"\s*[:\-]\s*"
+        r"((?:₹|Rs\.?|INR|\$)\s*[\d,]+"
+        r"(?:\.\d{1,2})?)",
+
+        r"\bfree\s+(?:registration|entry|event)\b",
+
+        r"\bfree\b",
+    )
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+
+            value = clean_value(
+                match.group(0)
+            )
+
+            if value:
+                return value
+
+    return ""
+
+
+# ============================================================
+# REGISTRATION URL
+# ============================================================
+
+def extract_registration_url(
+    soup: BeautifulSoup,
+    base_url: str,
+) -> str:
 
     for link in soup.find_all(
         "a",
         href=True,
     ):
-        link_text = link.get_text(
+
+        label = link.get_text(
             " ",
             strip=True,
         ).lower()
@@ -636,164 +750,490 @@ def registration_signal(
         href = link.get(
             "href",
             "",
-        ).lower()
+        ).strip()
 
-        combined = (
-            f"{link_text} {href}"
-        )
+        if not href:
+            continue
 
         if any(
-            keyword in combined
-            for keyword in REGISTRATION_KEYWORDS
+            keyword in label
+            for keyword in (
+                "register",
+                "registration",
+                "tickets",
+                "ticket",
+                "sign up",
+                "signup",
+                "book now",
+                "join",
+            )
         ):
-            return True
 
-    return False
+            return requests.compat.urljoin(
+                base_url,
+                href,
+            )
+
+    return ""
 
 
 # ============================================================
-# VERIFY EVENT
+# DESCRIPTION
+# ============================================================
+
+def extract_description(
+    soup: BeautifulSoup,
+) -> str:
+
+    # Meta description first
+    meta = soup.find(
+        "meta",
+        attrs={
+            "name": "description"
+        },
+    )
+
+    if meta:
+
+        content = meta.get(
+            "content",
+            "",
+        ).strip()
+
+        if len(content) >= 30:
+            return content[:600]
+
+    # OpenGraph description
+    og = soup.find(
+        "meta",
+        attrs={
+            "property": "og:description"
+        },
+    )
+
+    if og:
+
+        content = og.get(
+            "content",
+            "",
+        ).strip()
+
+        if len(content) >= 30:
+            return content[:600]
+
+    # First meaningful paragraph
+    for paragraph in soup.find_all("p"):
+
+        text = paragraph.get_text(
+            " ",
+            strip=True,
+        )
+
+        if len(text) >= 50:
+
+            return text[:600]
+
+    return ""
+
+
+# ============================================================
+# EVENT DATE DISPLAY
+# ============================================================
+
+def format_event_dates(
+    detected_dates: list[str],
+) -> tuple[str, str]:
+
+    parsed = []
+
+    for value in detected_dates:
+
+        parsed_date = parse_date(value)
+
+        if parsed_date:
+            parsed.append(
+                parsed_date
+            )
+
+    if not parsed:
+        return "", ""
+
+    parsed = sorted(
+        set(parsed)
+    )
+
+    start = parsed[0]
+
+    end = parsed[-1]
+
+    start_display = start.strftime(
+        "%d %B %Y"
+    )
+
+    end_display = end.strftime(
+        "%d %B %Y"
+    )
+
+    if start == end:
+        return start_display, ""
+
+    return start_display, end_display
+
+
+# ============================================================
+# MAIN VERIFICATION
 # ============================================================
 
 def verify_event(
     url: str,
 ) -> VerificationResult:
-    """Fetch and verify an event webpage."""
-
-    print(
-        f"   🔎 Verifying: {url}"
-    )
-
-    html = fetch_page(url)
-
-    if not html:
-        return VerificationResult(
-            reachable=False,
-            title="",
-            text="",
-            has_registration_signal=False,
-            has_date_signal=False,
-            has_future_date=False,
-            has_location_signal=False,
-            has_india_location=False,
-            has_online_signal=False,
-            has_cyber_signal=False,
-            has_event_signal=False,
-            detected_dates=[],
-        )
-
-    title, text = extract_page_content(
-        html
-    )
-
-    soup = BeautifulSoup(
-        html,
-        "lxml",
-    )
-
-    detected_dates = extract_dates(
-        text
-    )
-
-    future_date = has_future_date(
-        detected_dates
-    )
-
-    today_event = event_is_today(
-        detected_dates
-    )
-
-    has_location, has_india, has_online = (
-        location_signals(text)
-    )
-
-    has_registration = registration_signal(
-        soup,
-        text,
-    )
-
-    combined_text = (
-        f"{title} {text}"
-    )
-
-    has_cyber = contains_keyword(
-        combined_text,
-        CYBER_KEYWORDS,
-    )
-
-    has_event = contains_keyword(
-        combined_text,
-        EVENT_KEYWORDS,
-    )
 
     result = VerificationResult(
-        reachable=True,
-        title=title,
-        text=text,
-        has_registration_signal=has_registration,
-        has_date_signal=bool(detected_dates),
-        has_future_date=future_date,
-        has_location_signal=has_location,
-        has_india_location=has_india,
-        has_online_signal=has_online,
-        has_cyber_signal=has_cyber,
-        has_event_signal=has_event,
-        detected_dates=detected_dates,
+        event_url=url
     )
 
-    print(
-        f"   Page title: {title}"
-    )
+    try:
 
-    print(
-        f"   Cyber signal: {has_cyber}"
-    )
+        response = requests.get(
+            url,
+            timeout=TIMEOUT,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/120 Safari/537.36"
+                )
+            },
+            allow_redirects=True,
+        )
 
-    print(
-        f"   Event signal: {has_event}"
-    )
+        response.raise_for_status()
 
-    print(
-        f"   Date signal: "
-        f"{bool(detected_dates)}"
-    )
+        result.reachable = True
 
-    print(
-        f"   Detected dates: "
-        f"{detected_dates}"
-    )
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
 
-    print(
-        f"   India today: "
-        f"{get_india_today()}"
-    )
+        # Remove unnecessary elements
+        for tag in soup(
+            [
+                "script",
+                "style",
+                "noscript",
+                "svg",
+            ]
+        ):
+            tag.decompose()
 
-    print(
-        f"   Event TODAY: "
-        f"{today_event}"
-    )
+        title = ""
 
-    print(
-        f"   Future/today date: "
-        f"{future_date}"
-    )
+        if soup.title:
 
-    print(
-        f"   India location: "
-        f"{has_india}"
-    )
+            title = soup.title.get_text(
+                " ",
+                strip=True,
+            )
 
-    print(
-        f"   Online signal: "
-        f"{has_online}"
-    )
+        result.title = clean_value(
+            title
+        )
 
-    print(
-        f"   Registration: "
-        f"{has_registration}"
-    )
+        text = soup.get_text(
+            "\n",
+            strip=True,
+        )
 
-    return result
+        result.text = text
+
+        combined_text = (
+            f"{result.title}\n{text}"
+        )
+
+        lowered = combined_text.lower()
+
+        # ----------------------------------------------------
+        # Signals
+        # ----------------------------------------------------
+
+        result.has_cyber_signal = (
+            contains_keyword(
+                combined_text,
+                CYBER_KEYWORDS,
+            )
+        )
+
+        result.has_event_signal = (
+            contains_keyword(
+                combined_text,
+                EVENT_KEYWORDS,
+            )
+        )
+
+        result.has_location_signal = (
+            contains_keyword(
+                combined_text,
+                LOCATION_KEYWORDS,
+            )
+        )
+
+        result.has_india_location = (
+            contains_keyword(
+                combined_text,
+                INDIA_KEYWORDS,
+            )
+        )
+
+        result.has_online_signal = (
+            detect_event_mode(
+                combined_text
+            ) in (
+                "Online",
+                "Hybrid",
+            )
+        )
+
+        result.has_registration_signal = (
+            any(
+                keyword in lowered
+                for keyword in (
+                    "register",
+                    "registration",
+                    "tickets",
+                    "ticket",
+                    "sign up",
+                    "signup",
+                )
+            )
+        )
+
+        # ----------------------------------------------------
+        # Dates
+        # ----------------------------------------------------
+
+        result.detected_dates = (
+            extract_dates(
+                combined_text
+            )
+        )
+
+        result.has_date_signal = bool(
+            result.detected_dates
+        )
+
+        result.has_future_date = (
+            any(
+                (
+                    parsed := parse_date(value)
+                )
+                and parsed
+                >= datetime.now(
+                    INDIA_TIMEZONE
+                ).date()
+                for value in result.detected_dates
+            )
+        )
+
+        (
+            result.event_date,
+            result.event_end_date,
+        ) = format_event_dates(
+            result.detected_dates
+        )
+
+        # ----------------------------------------------------
+        # Rich event fields
+        # ----------------------------------------------------
+
+        result.event_time = (
+            extract_time(
+                combined_text
+            )
+        )
+
+        result.event_location = (
+            extract_location(
+                combined_text
+            )
+        )
+
+        result.event_venue = (
+            extract_venue(
+                combined_text
+            )
+        )
+
+        result.event_organizer = (
+            extract_organizer(
+                combined_text
+            )
+        )
+
+        result.event_type = (
+            detect_event_type(
+                combined_text
+            )
+        )
+
+        result.event_mode = (
+            detect_event_mode(
+                combined_text
+            )
+        )
+
+        result.event_price = (
+            extract_price(
+                combined_text
+            )
+        )
+
+        result.registration_url = (
+            extract_registration_url(
+                soup,
+                response.url,
+            )
+        )
+
+        result.event_description = (
+            extract_description(
+                soup
+            )
+        )
+
+        # ----------------------------------------------------
+        # Try to identify city/state/country
+        # ----------------------------------------------------
+
+        city_state_pairs = (
+            (
+                "Hyderabad",
+                "Telangana",
+                "India",
+            ),
+            (
+                "Bangalore",
+                "Karnataka",
+                "India",
+            ),
+            (
+                "Bengaluru",
+                "Karnataka",
+                "India",
+            ),
+            (
+                "Chennai",
+                "Tamil Nadu",
+                "India",
+            ),
+            (
+                "Mumbai",
+                "Maharashtra",
+                "India",
+            ),
+            (
+                "Pune",
+                "Maharashtra",
+                "India",
+            ),
+            (
+                "New Delhi",
+                "Delhi",
+                "India",
+            ),
+            (
+                "Delhi",
+                "Delhi",
+                "India",
+            ),
+            (
+                "Kolkata",
+                "West Bengal",
+                "India",
+            ),
+            (
+                "Ahmedabad",
+                "Gujarat",
+                "India",
+            ),
+            (
+                "Jaipur",
+                "Rajasthan",
+                "India",
+            ),
+            (
+                "Kochi",
+                "Kerala",
+                "India",
+            ),
+        )
+
+        for city, state, country in city_state_pairs:
+
+            if re.search(
+                rf"\b{re.escape(city)}\b",
+                combined_text,
+                flags=re.IGNORECASE,
+            ):
+
+                result.event_city = city
+                result.event_state = state
+                result.event_country = country
+
+                break
+
+        # India country
+        if (
+            not result.event_country
+            and re.search(
+                r"\bindia\b",
+                combined_text,
+                flags=re.IGNORECASE,
+            )
+        ):
+            result.event_country = "India"
+
+        # Online location fallback
+        if (
+            not result.event_location
+            and result.event_mode == "Online"
+        ):
+            result.event_location = (
+                "Online / Virtual"
+            )
+
+        # If location is simply city
+        if (
+            result.event_location
+            and not result.event_city
+        ):
+            for city, state, country in city_state_pairs:
+
+                if re.search(
+                    rf"\b{re.escape(city)}\b",
+                    result.event_location,
+                    flags=re.IGNORECASE,
+                ):
+
+                    result.event_city = city
+                    result.event_state = state
+                    result.event_country = country
+
+                    break
+
+        return result
+
+    except (
+        requests.RequestException,
+        ValueError,
+        UnicodeError,
+    ):
+
+        result.reachable = False
+
+        return result
 
 
 # ============================================================
@@ -803,34 +1243,24 @@ def verify_event(
 def verification_score(
     result: VerificationResult,
 ) -> int:
-    """Calculate event verification score."""
-
-    if not result.reachable:
-        return 0
 
     score = 0
 
-    # Cybersecurity relevance
     if result.has_cyber_signal:
         score += 20
 
-    # Event relevance
     if result.has_event_signal:
         score += 15
 
-    # Date exists
     if result.has_date_signal:
         score += 10
 
-    # Today or future
     if result.has_future_date:
         score += 25
 
-    # India or online
     if result.has_location_signal:
         score += 15
 
-    # Registration
     if result.has_registration_signal:
         score += 15
 
@@ -838,71 +1268,3 @@ def verification_score(
         score,
         100,
     )
-
-
-# ============================================================
-# TEST
-# ============================================================
-
-if __name__ == "__main__":
-
-    print("=" * 60)
-    print("🇮🇳 VERIFIER TEST")
-    print("=" * 60)
-
-    print(
-        f"India date: "
-        f"{get_india_today()}"
-    )
-
-    print()
-
-    test_dates = [
-        "4 September 2026",
-        "5 September 2026",
-        "04/09/2026",
-        "2026-09-04",
-        "4 Sep 2026",
-        "September 4, 2026",
-    ]
-
-    for test_date in test_dates:
-
-        parsed = parse_date(
-            test_date
-        )
-
-        today = (
-            parsed == get_india_today()
-            if parsed
-            else False
-        )
-
-        print(
-            f"{test_date:25} "
-            f"→ {parsed} "
-            f"→ TODAY={today}"
-        )
-
-    print()
-    print("=" * 60)
-
-    test_url = (
-        "https://owasp.org/events/"
-    )
-
-    result = verify_event(
-        test_url
-    )
-
-    score = verification_score(
-        result
-    )
-
-    print()
-    print("=" * 60)
-    print(
-        f"VERIFICATION SCORE: "
-        f"{score}/100"
-    )
-    print("=" * 60)
