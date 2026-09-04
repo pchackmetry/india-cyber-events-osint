@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import time
 from urllib.parse import quote
@@ -11,7 +12,9 @@ import requests
 # CONFIGURATION
 # ============================================================
 
-TELEGRAM_API_URL = "https://api.telegram.org/bot{}/sendMessage"
+TELEGRAM_API_URL = (
+    "https://api.telegram.org/bot{}/sendMessage"
+)
 
 MAX_MESSAGE_LENGTH = 3900
 
@@ -32,10 +35,13 @@ def safe_get(
     default: str = "Not specified",
 ) -> str:
     """
-    Safely get a value from an event dictionary.
+    Safely retrieve an event value.
     """
 
-    value = event.get(key, "")
+    value = event.get(
+        key,
+        "",
+    )
 
     if value is None:
         return default
@@ -48,12 +54,31 @@ def safe_get(
     return value
 
 
+def escape_html(
+    value: object,
+) -> str:
+    """
+    Escape user/event-provided text before placing it
+    inside Telegram HTML formatting.
+
+    Telegram HTML requires &, < and > to be escaped.
+    """
+
+    if value is None:
+        return ""
+
+    return html.escape(
+        str(value),
+        quote=True,
+    )
+
+
 def shorten_text(
     text: str,
     max_length: int,
 ) -> str:
     """
-    Keep Telegram messages within a safe length.
+    Keep Telegram messages within the allowed size.
     """
 
     text = str(text).strip()
@@ -85,18 +110,100 @@ def get_telegram_credentials():
     )
 
     if not bot_token:
+
         print(
             "❌ TELEGRAM_BOT_TOKEN "
             "environment variable is missing."
         )
 
     if not chat_id:
+
         print(
             "❌ TELEGRAM_CHAT_ID "
             "environment variable is missing."
         )
 
-    return bot_token, chat_id
+    return (
+        bot_token,
+        chat_id,
+    )
+
+
+# ============================================================
+# EVENT MODE HELPERS
+# ============================================================
+
+def normalize_mode(
+    event: dict,
+) -> str:
+    """
+    Normalize event mode.
+    """
+
+    mode = safe_get(
+        event,
+        "event_mode",
+        "",
+    )
+
+    mode = mode.strip().lower()
+
+    if mode in (
+        "online",
+        "virtual",
+        "remote",
+    ):
+        return "Online"
+
+    if mode in (
+        "offline",
+        "in-person",
+        "in person",
+        "physical",
+    ):
+        return "Offline"
+
+    if mode == "hybrid":
+        return "Hybrid"
+
+    return (
+        mode.title()
+        if mode
+        else "Not specified"
+    )
+
+
+def is_online_event(
+    event: dict,
+) -> bool:
+    """
+    Determine whether the event is online/remote/virtual.
+    """
+
+    mode = normalize_mode(
+        event
+    )
+
+    if mode in (
+        "Online",
+        "Hybrid",
+    ):
+        return True
+
+    location = safe_get(
+        event,
+        "event_location",
+        "",
+    ).lower()
+
+    return any(
+        keyword in location
+        for keyword in (
+            "online",
+            "virtual",
+            "remote",
+        )
+    )
 
 
 # ============================================================
@@ -107,17 +214,15 @@ def create_google_maps_link(
     event: dict,
 ) -> str:
     """
-    Create a Google Maps search link only when a physical
-    location is available.
+    Create a Google Maps link only for physical events.
 
-    Online events do not receive a Maps link.
+    International online events do NOT receive a Maps link.
     """
 
-    mode = safe_get(
-        event,
-        "event_mode",
-        "",
-    ).lower()
+    if is_online_event(
+        event
+    ):
+        return ""
 
     location = safe_get(
         event,
@@ -149,16 +254,6 @@ def create_google_maps_link(
         "",
     )
 
-    # Do not create Maps links for online events.
-    if mode in (
-        "online",
-        "virtual",
-    ):
-        return ""
-
-    if not location and not venue and not city:
-        return ""
-
     parts = []
 
     for value in (
@@ -169,16 +264,32 @@ def create_google_maps_link(
         country,
     ):
 
-        if value and value != "Not specified":
-            parts.append(value)
+        if not value:
+            continue
+
+        if value == "Not specified":
+            continue
+
+        if value.lower() in (
+            part.lower()
+            for part in parts
+        ):
+            continue
+
+        parts.append(
+            value
+        )
 
     if not parts:
         return ""
 
-    query = ", ".join(parts)
+    query = ", ".join(
+        parts
+    )
 
     return (
-        "https://www.google.com/maps/search/?api=1"
+        "https://www.google.com/maps/search/"
+        "?api=1"
         f"&query={quote(query)}"
     )
 
@@ -202,7 +313,7 @@ def get_event_url(
 
         value = event.get(
             key,
-            ""
+            "",
         )
 
         if value:
@@ -211,7 +322,13 @@ def get_event_url(
                 value
             ).strip()
 
-            if value:
+            if value.startswith(
+                (
+                    "http://",
+                    "https://",
+                )
+            ):
+
                 return value
 
     return ""
@@ -236,7 +353,7 @@ def get_registration_url(
 
         value = event.get(
             key,
-            ""
+            "",
         )
 
         if value:
@@ -245,21 +362,27 @@ def get_registration_url(
                 value
             ).strip()
 
-            if value:
+            if value.startswith(
+                (
+                    "http://",
+                    "https://",
+                )
+            ):
+
                 return value
 
     return ""
 
 
 # ============================================================
-# DATE FORMAT
+# DATE
 # ============================================================
 
 def format_event_date(
     event: dict,
 ) -> str:
     """
-    Format the extracted start/end date.
+    Format event start/end date.
     """
 
     start = safe_get(
@@ -274,7 +397,10 @@ def format_event_date(
         "",
     )
 
-    if not start or start == "Not specified":
+    if (
+        not start
+        or start == "Not specified"
+    ):
         return "Not specified"
 
     if (
@@ -282,13 +408,16 @@ def format_event_date(
         and end != "Not specified"
         and end != start
     ):
-        return f"{start} – {end}"
+
+        return (
+            f"{start} – {end}"
+        )
 
     return start
 
 
 # ============================================================
-# LOCATION FORMAT
+# LOCATION
 # ============================================================
 
 def format_location(
@@ -296,7 +425,13 @@ def format_location(
 ) -> str:
     """
     Build a clean human-readable location.
+
+    Avoids duplicated venue/city/country values.
     """
+
+    mode = normalize_mode(
+        event
+    )
 
     location = safe_get(
         event,
@@ -328,66 +463,285 @@ def format_location(
         "",
     )
 
+    # --------------------------------------------------------
+    # Online event
+    # --------------------------------------------------------
+
+    if mode == "Online":
+
+        if location:
+            location_lower = (
+                location.lower()
+            )
+
+            if any(
+                keyword in location_lower
+                for keyword in (
+                    "online",
+                    "virtual",
+                    "remote",
+                )
+            ):
+
+                return "Online / Virtual"
+
+        return "Online / Virtual"
+
+    # --------------------------------------------------------
+    # Hybrid
+    # --------------------------------------------------------
+
+    if mode == "Hybrid":
+
+        if location:
+
+            return location
+
+        return "Hybrid"
+
+    # --------------------------------------------------------
+    # Physical event
+    # --------------------------------------------------------
+
     parts = []
 
-    # Physical venue
+    # Add venue first.
     if (
         venue
         and venue != "Not specified"
-        and venue.lower() not in (
-            location.lower(),
-            "online",
-            "virtual",
-            "online / virtual",
-        )
     ):
-        parts.append(venue)
 
-    # Location
+        parts.append(
+            venue
+        )
+
+    # Add location only when it isn't already
+    # represented by the venue.
     if (
         location
         and location != "Not specified"
     ):
-        if not parts or location.lower() != parts[-1].lower():
-            parts.append(location)
 
-    # City
+        location_lower = (
+            location.lower()
+        )
+
+        existing = [
+            part.lower()
+            for part in parts
+        ]
+
+        if location_lower not in existing:
+
+            # Don't repeat a venue that is already
+            # contained inside the location.
+            if not any(
+                venue.lower()
+                in location_lower
+                for venue in (
+                    [venue]
+                    if venue
+                    else []
+                )
+            ):
+
+                parts.append(
+                    location
+                )
+
+    # City.
     if (
         city
         and city != "Not specified"
-        and city.lower() not in (
+        and city.lower()
+        not in (
             part.lower()
             for part in parts
         )
     ):
-        parts.append(city)
 
-    # State
+        parts.append(
+            city
+        )
+
+    # State.
     if (
         state
         and state != "Not specified"
-        and state.lower() not in (
+        and state.lower()
+        not in (
             part.lower()
             for part in parts
         )
     ):
-        parts.append(state)
 
-    # Country
+        parts.append(
+            state
+        )
+
+    # Country.
     if (
         country
         and country != "Not specified"
-        and country.lower() not in (
+        and country.lower()
+        not in (
             part.lower()
             for part in parts
         )
     ):
-        parts.append(country)
+
+        parts.append(
+            country
+        )
 
     if parts:
-        return ", ".join(parts)
+
+        return ", ".join(
+            parts
+        )
 
     return "Not specified"
+
+
+# ============================================================
+# DESCRIPTION
+# ============================================================
+
+def get_description(
+    event: dict,
+) -> str:
+    """
+    Get a clean event description.
+    """
+
+    description = safe_get(
+        event,
+        "event_description",
+        "",
+    )
+
+    if (
+        not description
+        or description == "Not specified"
+    ):
+
+        description = safe_get(
+            event,
+            "description",
+            "",
+        )
+
+    if (
+        not description
+        or description == "Not specified"
+    ):
+
+        return (
+            "No description available."
+        )
+
+    return description
+
+
+# ============================================================
+# SOURCE
+# ============================================================
+
+def get_source(
+    event: dict,
+) -> str:
+
+    return safe_get(
+        event,
+        "source",
+        "Unknown",
+    )
+
+
+# ============================================================
+# VERIFICATION SCORE
+# ============================================================
+
+def get_verification_score(
+    event: dict,
+) -> str:
+
+    value = event.get(
+        "verification_score",
+        event.get(
+            "score",
+            "0",
+        ),
+    )
+
+    if value is None:
+        return "0"
+
+    return str(
+        value
+    )
+
+
+# ============================================================
+# EVENT ORIGIN LABEL
+# ============================================================
+
+def get_origin_label(
+    event: dict,
+) -> str:
+    """
+    Explain why this event is allowed.
+
+    India physical:
+        🇮🇳 India physical event
+
+    India online:
+        🌐 India / online
+
+    International online:
+        🌍 International online event
+
+    Hybrid:
+        🌐 Hybrid event
+    """
+
+    mode = normalize_mode(
+        event
+    )
+
+    country = safe_get(
+        event,
+        "event_country",
+        "",
+    ).lower()
+
+    if mode == "Online":
+
+        if country == "india":
+
+            return (
+                "🌐 <b>Online event — India</b>"
+            )
+
+        return (
+            "🌍 <b>International online event</b>"
+        )
+
+    if mode == "Hybrid":
+
+        if country == "india":
+
+            return (
+                "🇮🇳 <b>India hybrid event</b>"
+            )
+
+        return (
+            "🌐 <b>Hybrid cybersecurity event</b>"
+        )
+
+    return (
+        "🇮🇳 <b>India physical event</b>"
+    )
 
 
 # ============================================================
@@ -398,8 +752,14 @@ def build_event_message(
     event: dict,
 ) -> str:
     """
-    Build the complete Telegram cybersecurity event alert.
+    Build the Telegram cybersecurity event alert.
+
+    All dynamic event data is HTML-escaped.
     """
+
+    # --------------------------------------------------------
+    # Raw values
+    # --------------------------------------------------------
 
     title = safe_get(
         event,
@@ -421,10 +781,14 @@ def build_event_message(
         event
     )
 
-    mode = safe_get(
+    mode = normalize_mode(
+        event
+    )
+
+    venue = safe_get(
         event,
-        "event_mode",
-        "Not specified",
+        "event_venue",
+        "",
     )
 
     organizer = safe_get(
@@ -445,19 +809,19 @@ def build_event_message(
         "Not specified",
     )
 
-    description = safe_get(
-        event,
-        "event_description",
-        "",
+    description = get_description(
+        event
     )
 
-    if not description:
+    source = get_source(
+        event
+    )
 
-        description = safe_get(
-            event,
-            "description",
-            "No description available.",
+    verification_score = (
+        get_verification_score(
+            event
         )
+    )
 
     registration_url = (
         get_registration_url(
@@ -469,25 +833,76 @@ def build_event_message(
         event
     )
 
-    source = safe_get(
-        event,
-        "source",
-        "Unknown",
+    maps_url = (
+        create_google_maps_link(
+            event
+        )
     )
 
-    verification_score = safe_get(
-        event,
-        "verification_score",
-        "0",
+    origin_label = (
+        get_origin_label(
+            event
+        )
     )
 
-    maps_url = create_google_maps_link(
-        event
+    # --------------------------------------------------------
+    # Escape dynamic text
+    # --------------------------------------------------------
+
+    title_html = escape_html(
+        title
     )
 
-    # ========================================================
-    # BUILD MESSAGE
-    # ========================================================
+    date_html = escape_html(
+        date_text
+    )
+
+    time_html = escape_html(
+        event_time
+    )
+
+    location_html = escape_html(
+        location
+    )
+
+    mode_html = escape_html(
+        mode
+    )
+
+    venue_html = escape_html(
+        venue
+    )
+
+    organizer_html = escape_html(
+        organizer
+    )
+
+    event_type_html = escape_html(
+        event_type
+    )
+
+    price_html = escape_html(
+        price
+    )
+
+    description_html = escape_html(
+        shorten_text(
+            description,
+            800,
+        )
+    )
+
+    source_html = escape_html(
+        source
+    )
+
+    score_html = escape_html(
+        verification_score
+    )
+
+    # --------------------------------------------------------
+    # Build message
+    # --------------------------------------------------------
 
     lines = []
 
@@ -502,80 +917,87 @@ def build_event_message(
     lines.append("")
 
     lines.append(
-        f"📌 <b>{title}</b>"
+        f"📌 <b>{title_html}</b>"
     )
 
     lines.append("")
 
-    # Date
     lines.append(
-        f"📅 <b>Date:</b> {date_text}"
+        f"📅 <b>Date:</b> {date_html}"
     )
 
-    # Time
     lines.append(
-        f"🕐 <b>Time:</b> {event_time}"
+        f"🕐 <b>Time:</b> {time_html}"
     )
 
-    # Location
     lines.append(
-        f"📍 <b>Location:</b> {location}"
+        f"📍 <b>Location:</b> {location_html}"
     )
 
-    # Mode
     lines.append(
-        f"🌐 <b>Mode:</b> {mode}"
+        f"🌐 <b>Mode:</b> {mode_html}"
     )
 
-    # Venue
-    venue = safe_get(
-        event,
-        "event_venue",
-        "",
-    )
+    # Venue only for physical/hybrid events.
+    if (
+        venue
+        and venue != "Not specified"
+        and mode != "Online"
+    ):
 
-    if venue:
         lines.append(
-            f"🏢 <b>Venue:</b> {venue}"
+            f"🏢 <b>Venue:</b> "
+            f"{venue_html}"
         )
 
-    # Organizer
     lines.append(
-        f"🏛️ <b>Organizer:</b> {organizer}"
+        f"🏛️ <b>Organizer:</b> "
+        f"{organizer_html}"
     )
 
-    # Event type
     lines.append(
-        f"🎯 <b>Type:</b> {event_type}"
+        f"🎯 <b>Type:</b> "
+        f"{event_type_html}"
     )
 
-    # Price
     lines.append(
-        f"💰 <b>Price:</b> {price}"
+        f"💰 <b>Price:</b> "
+        f"{price_html}"
     )
 
     lines.append("")
 
+    # --------------------------------------------------------
     # Description
+    # --------------------------------------------------------
+
     lines.append(
         "📝 <b>Description:</b>"
     )
 
     lines.append(
-        shorten_text(
-            description,
-            800,
-        )
+        description_html
     )
 
     lines.append("")
 
+    # --------------------------------------------------------
     # Registration
+    # --------------------------------------------------------
+
     if registration_url:
 
+        safe_registration_url = (
+            escape_html(
+                registration_url
+            )
+        )
+
         lines.append(
-            f'🎟️ <b><a href="{registration_url}">'
-            "Register / Tickets</a></b>"
+            f'🎟️ <b><a href="'
+            f'{safe_registration_url}">'
+            f'Register / Tickets'
+            f'</a></b>'
         )
 
     else:
@@ -585,38 +1007,68 @@ def build_event_message(
             "Not found"
         )
 
+    # --------------------------------------------------------
     # Event page
+    # --------------------------------------------------------
+
     if event_url:
 
-        lines.append(
-            f'🔗 <b><a href="{event_url}">'
-            "Event Page</a></b>"
+        safe_event_url = (
+            escape_html(
+                event_url
+            )
         )
 
-    # Maps
+        lines.append(
+            f'🔗 <b><a href="'
+            f'{safe_event_url}">'
+            f'Event Page'
+            f'</a></b>'
+        )
+
+    # --------------------------------------------------------
+    # Google Maps
+    # --------------------------------------------------------
+
     if maps_url:
 
+        safe_maps_url = (
+            escape_html(
+                maps_url
+            )
+        )
+
         lines.append(
-            f'🗺️ <b><a href="{maps_url}">'
-            "Google Maps</a></b>"
+            f'🗺️ <b><a href="'
+            f'{safe_maps_url}">'
+            f'Google Maps'
+            f'</a></b>'
         )
 
     lines.append("")
 
+    # --------------------------------------------------------
     # Verification
+    # --------------------------------------------------------
+
     lines.append(
         f"🔎 <b>Verification:</b> "
-        f"{verification_score}/100"
+        f"{score_html}/100"
     )
 
     lines.append(
-        f"🌐 <b>Source:</b> {source}"
+        f"🌐 <b>Source:</b> "
+        f"{source_html}"
     )
 
     lines.append("")
 
+    # --------------------------------------------------------
+    # Origin / eligibility
+    # --------------------------------------------------------
+
     lines.append(
-        "🇮🇳 <b>Today-only verified event</b>"
+        origin_label
     )
 
     message = "\n".join(
@@ -637,19 +1089,24 @@ def send_telegram(
     message: str,
 ) -> bool:
     """
-    Send a message through Telegram Bot API.
+    Send a Telegram message through Bot API.
     """
 
     bot_token, chat_id = (
         get_telegram_credentials()
     )
 
-    if not bot_token or not chat_id:
+    if (
+        not bot_token
+        or not chat_id
+    ):
 
         return False
 
-    url = TELEGRAM_API_URL.format(
-        bot_token
+    url = (
+        TELEGRAM_API_URL.format(
+            bot_token
+        )
     )
 
     payload = {
@@ -674,18 +1131,30 @@ def send_telegram(
 
             if response.ok:
 
-                data = response.json()
+                try:
+
+                    data = (
+                        response.json()
+                    )
+
+                except ValueError:
+
+                    data = {}
 
                 if data.get(
                     "ok",
-                    False
+                    False,
                 ):
+
+                    print(
+                        "✅ Telegram message sent."
+                    )
 
                     return True
 
                 print(
-                    "❌ Telegram API returned "
-                    "ok=false:"
+                    "❌ Telegram API "
+                    "returned ok=false:"
                 )
 
                 print(
@@ -695,8 +1164,7 @@ def send_telegram(
             else:
 
                 print(
-                    f"⚠️ Telegram HTTP "
-                    f"error: "
+                    "⚠️ Telegram HTTP error: "
                     f"{response.status_code}"
                 )
 
@@ -707,8 +1175,7 @@ def send_telegram(
         except requests.RequestException as exc:
 
             print(
-                f"⚠️ Telegram request "
-                f"failed "
+                "⚠️ Telegram request failed "
                 f"(attempt {attempt}/"
                 f"{MAX_RETRIES}): "
                 f"{exc}"
@@ -719,6 +1186,11 @@ def send_telegram(
             time.sleep(
                 RETRY_DELAY
             )
+
+    print(
+        "❌ Telegram message failed "
+        "after all retries."
+    )
 
     return False
 
@@ -731,15 +1203,14 @@ def send_event_alert(
     event: dict,
 ) -> bool:
     """
-    Build and send a cybersecurity event alert.
+    Build and send an event alert.
 
-    The pipeline has already performed the TODAY-only
-    validation before reaching this function.
+    The pipeline should already have verified the event.
     """
 
     if not isinstance(
         event,
-        dict
+        dict,
     ):
 
         print(
@@ -748,11 +1219,16 @@ def send_event_alert(
 
         return False
 
-    # Final safety check
-    if not event.get(
+    # --------------------------------------------------------
+    # Safety validation
+    # --------------------------------------------------------
+
+    is_today = event.get(
         "is_today",
-        False
-    ):
+        False,
+    )
+
+    if not is_today:
 
         print(
             "🛑 Telegram blocked: "
@@ -760,6 +1236,10 @@ def send_event_alert(
         )
 
         return False
+
+    # --------------------------------------------------------
+    # Build message
+    # --------------------------------------------------------
 
     message = build_event_message(
         event
@@ -772,6 +1252,11 @@ def send_event_alert(
     print(
         message
     )
+    print()
+
+    # --------------------------------------------------------
+    # Send
+    # --------------------------------------------------------
 
     return send_telegram(
         message
@@ -779,41 +1264,109 @@ def send_event_alert(
 
 
 # ============================================================
-# OPTIONAL TEST
+# TEST MESSAGE
 # ============================================================
 
 if __name__ == "__main__":
 
     test_event = {
+
         "title": (
-            "Example Cybersecurity Event"
+            "International "
+            "Cybersecurity Webinar "
+            "2026"
         ),
-        "source": "Example Source",
-        "event_date": "04 September 2026",
+
+        "source": (
+            "Example International Source"
+        ),
+
+        "event_date": (
+            "04 September 2026"
+        ),
+
         "event_end_date": "",
-        "event_time": "10:00 AM – 5:00 PM",
-        "event_location": "Hyderabad",
-        "event_venue": "HICC",
-        "event_city": "Hyderabad",
-        "event_state": "Telangana",
-        "event_country": "India",
-        "event_mode": "Offline",
-        "event_organizer": "Example Organizer",
-        "event_type": "Conference",
-        "event_price": "Free",
-        "event_description": (
-            "Example cybersecurity conference."
+
+        "event_time": (
+            "10:00 AM – 12:00 PM"
         ),
-        "registration_url": "",
+
+        "event_location": (
+            "Online"
+        ),
+
+        "event_venue": "",
+
+        "event_city": "",
+
+        "event_state": "",
+
+        "event_country": (
+            "United States"
+        ),
+
+        "event_mode": (
+            "Online"
+        ),
+
+        "event_organizer": (
+            "Example Security Organization"
+        ),
+
+        "event_type": (
+            "Webinar"
+        ),
+
+        "event_price": (
+            "Free"
+        ),
+
+        "event_description": (
+            "An international online "
+            "cybersecurity event covering "
+            "application security, threat "
+            "intelligence and security "
+            "operations."
+        ),
+
+        "registration_url": (
+            "https://example.com/register"
+        ),
+
         "event_url": (
             "https://example.com/event"
         ),
-        "verification_score": 100,
+
+        "verification_score": (
+            "100"
+        ),
+
         "is_today": True,
     }
 
+    print()
     print(
+        "=" * 70
+    )
+
+    print(
+        "TELEGRAM TEST MESSAGE"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    test_message = (
         build_event_message(
             test_event
         )
+    )
+
+    print(
+        test_message
+    )
+
+    print(
+        "=" * 70
     )
