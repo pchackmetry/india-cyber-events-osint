@@ -968,7 +968,7 @@ def collect_search_pages() -> list[Candidate]:
 
     candidates = []
 
-    max_queries = 80
+    max_queries = 20
 
     for number, query in enumerate(
         queries[:max_queries],
