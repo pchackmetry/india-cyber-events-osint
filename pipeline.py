@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from collectors import collect_candidates
 from verifier import verify_event, verification_score
@@ -17,6 +19,98 @@ STATE_FILE = Path("sent_events.json")
 # Maximum number of NEW Telegram alerts per run.
 MAX_TELEGRAM_ALERTS_PER_RUN = 10
 
+# India timezone
+INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
+
+# ------------------------------------------------------------
+# TODAY FILTER
+# ------------------------------------------------------------
+
+def get_india_today() -> date:
+    """
+    Return today's date in India.
+    """
+    from datetime import datetime
+
+    return datetime.now(INDIA_TIMEZONE).date()
+
+
+def event_is_today(result) -> bool:
+    """
+    Return True only when the verified event is happening today.
+
+    Supports:
+    - Single date
+    - Multi-day date ranges, provided verifier.py exposes
+      detected_dates containing the event dates.
+
+    Unknown dates are rejected.
+    """
+
+    today = get_india_today()
+
+    detected_dates = getattr(result, "detected_dates", None)
+
+    if not detected_dates:
+        return False
+
+    parsed_dates = []
+
+    for value in detected_dates:
+        if isinstance(value, date):
+            parsed_dates.append(value)
+            continue
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            # Try common ISO format first
+            try:
+                parsed_dates.append(date.fromisoformat(value))
+                continue
+            except ValueError:
+                pass
+
+            # Try common display formats
+            formats = (
+                "%d %B %Y",
+                "%d %b %Y",
+                "%B %d %Y",
+                "%b %d %Y",
+                "%d/%m/%Y",
+                "%d-%m-%Y",
+                "%Y/%m/%d",
+            )
+
+            for fmt in formats:
+                try:
+                    parsed_dates.append(
+                        __import__("datetime")
+                        .datetime.strptime(value, fmt)
+                        .date()
+                    )
+                    break
+                except ValueError:
+                    continue
+
+    if not parsed_dates:
+        return False
+
+    # If the exact date is today
+    if today in parsed_dates:
+        return True
+
+    # For multi-day events, if verifier provides two or more
+    # dates, consider the range between the earliest and latest.
+    earliest = min(parsed_dates)
+    latest = max(parsed_dates)
+
+    if earliest <= today <= latest:
+        return True
+
+    return False
+
 
 # ------------------------------------------------------------
 # STATE MANAGEMENT
@@ -29,14 +123,10 @@ def load_sent_urls() -> set[str]:
     """
 
     if not STATE_FILE.exists():
-        print(
-            "ℹ️ sent_events.json not found."
-        )
-
+        print("ℹ️ sent_events.json not found.")
         return set()
 
     try:
-
         with STATE_FILE.open(
             "r",
             encoding="utf-8",
@@ -49,14 +139,8 @@ def load_sent_urls() -> set[str]:
             [],
         )
 
-        if not isinstance(
-            sent_urls,
-            list,
-        ):
-            print(
-                "⚠️ Invalid sent_urls format."
-            )
-
+        if not isinstance(sent_urls, list):
+            print("⚠️ Invalid sent_urls format.")
             return set()
 
         return {
@@ -129,11 +213,17 @@ def save_sent_urls(
 
 def run_pipeline():
 
+    today = get_india_today()
+
     print("=" * 60)
+    print("🇮🇳 INDIA CYBERSECURITY EVENT PIPELINE")
+    print("=" * 60)
+
+    print()
     print(
-        "🇮🇳 INDIA CYBERSECURITY EVENT PIPELINE"
+        f"📅 TODAY FILTER: "
+        f"{today.strftime('%d %B %Y')}"
     )
-    print("=" * 60)
 
     # --------------------------------------------------------
     # LOAD PREVIOUSLY SENT EVENTS
@@ -164,6 +254,8 @@ def run_pipeline():
     # --------------------------------------------------------
 
     verified = []
+
+    today_events_rejected = 0
 
     for number, candidate in enumerate(
         candidates,
@@ -214,8 +306,38 @@ def run_pipeline():
             continue
 
         # ----------------------------------------------------
-        # Store verified event
+        # STRICT TODAY-ONLY FILTER
         # ----------------------------------------------------
+
+        if not event_is_today(result):
+
+            detected_dates = getattr(
+                result,
+                "detected_dates",
+                [],
+            )
+
+            print(
+                "   ⏭️ Rejected: "
+                "event is not happening today"
+            )
+
+            print(
+                f"   📅 Detected dates: "
+                f"{detected_dates}"
+            )
+
+            today_events_rejected += 1
+
+            continue
+
+        # ----------------------------------------------------
+        # Store verified TODAY event
+        # ----------------------------------------------------
+
+        print(
+            "   ✅ Event is happening TODAY"
+        )
 
         verified.append(
             {
@@ -253,6 +375,12 @@ def run_pipeline():
                 "detected_dates": (
                     result.detected_dates
                 ),
+
+                # Explicitly store today's date
+                "event_date": today.isoformat(),
+
+                # Useful for Telegram
+                "is_today": True,
             }
         )
 
@@ -306,10 +434,15 @@ def run_pipeline():
     print()
     print("=" * 60)
     print(
-        f"✅ VERIFIED UNIQUE EVENTS: "
+        f"✅ VERIFIED TODAY EVENTS: "
         f"{len(verified)}"
     )
     print("=" * 60)
+
+    print(
+        f"⏭️ Non-today events rejected: "
+        f"{today_events_rejected}"
+    )
 
     # --------------------------------------------------------
     # FIND NEW EVENTS
@@ -337,7 +470,7 @@ def run_pipeline():
     print()
     print("=" * 60)
     print(
-        f"🆕 NEW EVENTS: "
+        f"🆕 NEW TODAY EVENTS: "
         f"{len(new_events)}"
     )
     print("=" * 60)
@@ -350,7 +483,7 @@ def run_pipeline():
 
         print()
         print(
-            "ℹ️ No new cybersecurity events."
+            "ℹ️ No new TODAY cybersecurity events."
         )
 
         print(
@@ -374,7 +507,7 @@ def run_pipeline():
 
     print()
     print(
-        f"📨 New events available: "
+        f"📨 New TODAY events available: "
         f"{len(new_events)}"
     )
 
@@ -386,7 +519,7 @@ def run_pipeline():
     if skipped_count > 0:
 
         print(
-            f"⏭️ New events waiting for "
+            f"⏭️ TODAY events waiting for "
             f"future runs: "
             f"{skipped_count}"
         )
@@ -398,7 +531,7 @@ def run_pipeline():
     print()
     print("=" * 60)
     print(
-        "📨 SENDING NEW TELEGRAM ALERTS"
+        "📨 SENDING TODAY'S TELEGRAM ALERTS"
     )
     print("=" * 60)
 
@@ -412,10 +545,21 @@ def run_pipeline():
         print()
 
         print(
-            f"📨 Sending new event "
+            f"📨 Sending TODAY event "
             f"{number}/"
             f"{len(events_to_alert)}"
         )
+
+        # Final safety check immediately before Telegram.
+        if not event.get("is_today", False):
+
+            print(
+                f"🛑 BLOCKED: "
+                f"{event['title']} "
+                f"is not marked as TODAY."
+            )
+
+            continue
 
         success = send_event_alert(
             event
@@ -477,7 +621,12 @@ def run_pipeline():
     print("=" * 60)
 
     print(
-        f"🆕 New events found: "
+        f"📅 Pipeline date: "
+        f"{today.strftime('%d %B %Y')}"
+    )
+
+    print(
+        f"🆕 New TODAY events found: "
         f"{len(new_events)}"
     )
 
@@ -497,14 +646,17 @@ def run_pipeline():
     )
 
     print(
-        f"⏭️ New events waiting: "
-        f"{skipped_count}"
+        f"⏭️ Events rejected because "
+        f"they are not TODAY: "
+        f"{today_events_rejected}"
     )
 
     print(
         f"📚 Total recorded as sent: "
         f"{len(sent_urls)}"
     )
+
+    print("=" * 60)
 
     return verified
 
@@ -515,4 +667,3 @@ def run_pipeline():
 
 if __name__ == "__main__":
     run_pipeline()
-
