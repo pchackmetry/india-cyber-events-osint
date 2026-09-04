@@ -71,30 +71,31 @@ CYBER_TOPICS = [
     "information security",
     "infosec",
     "application security",
-    "AppSec",
+    "appsec",
     "cloud security",
-    "AI security",
+    "ai security",
     "network security",
-    "SOC",
+    "soc",
     "blue team",
     "red team",
     "penetration testing",
     "pentesting",
     "ethical hacking",
-    "VAPT",
+    "vapt",
     "vulnerability",
     "bug bounty",
     "digital forensics",
-    "DFIR",
+    "dfir",
     "incident response",
     "threat intelligence",
     "malware",
-    "OSINT",
-    "GRC",
-    "IAM",
+    "osint",
+    "grc",
+    "iam",
     "identity security",
-    "CTF",
+    "ctf",
     "capture the flag",
+    "owasp",
 ]
 
 
@@ -113,9 +114,50 @@ EVENT_TYPES = [
     "seminar",
     "networking",
     "community",
-    "CTF",
+    "ctf",
     "hackathon",
 ]
+
+
+# ============================================================
+# INVALID / NON-EVENT LINK SIGNALS
+# ============================================================
+
+INVALID_LINK_TEXT = {
+    "global events",
+    "regional events",
+    "partner events",
+    "all events",
+    "upcoming events",
+    "past events",
+    "event calendar",
+    "events calendar",
+    "event listings",
+    "events listings",
+    "events directory",
+    "event directory",
+    "event archive",
+    "events archive",
+    "chapters",
+    "all chapters",
+    "find events",
+    "browse events",
+    "view all events",
+    "see all events",
+}
+
+INVALID_FRAGMENT_NAMES = {
+    "#global",
+    "#partner",
+    "#partners",
+    "#regional",
+    "#regional-events",
+    "#global-events",
+    "#upcoming",
+    "#past",
+    "#events",
+    "#calendar",
+}
 
 
 # ============================================================
@@ -202,6 +244,80 @@ def normalize(text: str) -> str:
 
 
 # ============================================================
+# INVALID LINK DETECTION
+# ============================================================
+
+def is_invalid_link(
+    title: str,
+    url: str,
+) -> bool:
+
+    clean_title = normalize(
+        title
+    )
+
+    clean_url = (
+        url.strip()
+        .lower()
+    )
+
+    # --------------------------------------------------------
+    # Reject fragment-only OWASP section links.
+    # --------------------------------------------------------
+
+    fragment = ""
+
+    if "#" in clean_url:
+        fragment = (
+            "#"
+            + clean_url.split(
+                "#",
+                1
+            )[1]
+        )
+
+    if fragment in INVALID_FRAGMENT_NAMES:
+        return True
+
+    # --------------------------------------------------------
+    # Reject known listing/index section names.
+    # --------------------------------------------------------
+
+    if clean_title in INVALID_LINK_TEXT:
+        return True
+
+    # --------------------------------------------------------
+    # Reject obvious listing URLs.
+    # --------------------------------------------------------
+
+    listing_patterns = [
+        r"/events/?$",
+        r"/events/$",
+        r"/events/#",
+        r"/event/",
+        r"/events\?",
+        r"/search",
+        r"/discover",
+        r"/calendar",
+        r"/categories",
+        r"/archive",
+        r"/directory",
+        r"/chapters/?$",
+    ]
+
+    for pattern in listing_patterns:
+
+        if re.search(
+            pattern,
+            clean_url,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+    return False
+
+
+# ============================================================
 # CYBER RELEVANCE
 # ============================================================
 
@@ -238,7 +354,9 @@ def detect_location(
     text: str,
 ) -> str:
 
-    normalized = normalize(text)
+    normalized = normalize(
+        text
+    )
 
     for city in INDIAN_CITIES:
 
@@ -246,18 +364,22 @@ def detect_location(
 
             return city
 
-        # Bangalore/Bengaluru variations.
         if city == "Bengaluru":
+
             if "bangalore" in normalized:
+
                 return "Bengaluru"
 
     if "india" in normalized:
+
         return "India"
 
     if "online" in normalized:
+
         return "Online"
 
     if "virtual" in normalized:
+
         return "Online"
 
     return "Unknown"
@@ -311,16 +433,92 @@ def extract_links(
         ):
             continue
 
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # Reject source/index/section links BEFORE
+        # cybersecurity detection.
+        # ----------------------------------------------------
+
+        if is_invalid_link(
+            title,
+            url,
+        ):
+
+            print(
+                f"      ⏭️ Skipping listing/section: "
+                f"{title} -> {url}"
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Reject links that point back to the same page.
+        # ----------------------------------------------------
+
+        normalized_base = (
+            base_url
+            .split("#", 1)[0]
+            .rstrip("/")
+            .lower()
+        )
+
+        normalized_url = (
+            url
+            .split("#", 1)[0]
+            .rstrip("/")
+            .lower()
+        )
+
+        if normalized_url == normalized_base:
+
+            print(
+                f"      ⏭️ Skipping source page: "
+                f"{title}"
+            )
+
+            continue
+
+        # ----------------------------------------------------
         # Build nearby context.
+        # ----------------------------------------------------
+
         parent_text = ""
 
         parent = link.parent
 
         if parent:
+
             parent_text = parent.get_text(
                 " ",
                 strip=True,
             )
+
+        # Also inspect the closest useful container.
+        container_text = ""
+
+        for parent_level in (
+            link.parent,
+            link.parent.parent
+            if link.parent
+            else None,
+        ):
+
+            if parent_level:
+
+                container_text = (
+                    parent_level.get_text(
+                        " ",
+                        strip=True,
+                    )
+                )
+
+                if len(container_text) > len(
+                    parent_text
+                ):
+
+                    parent_text = (
+                        container_text
+                    )
 
         context = (
             f"{title} "
@@ -328,10 +526,15 @@ def extract_links(
             f"{url}"
         )
 
+        # ----------------------------------------------------
+        # Cybersecurity + event relevance.
+        # ----------------------------------------------------
+
         if not is_cyber_event(
             title,
             context,
         ):
+
             continue
 
         location = detect_location(
@@ -410,9 +613,6 @@ def collect_direct_sources() -> list[Candidate]:
 
 # ============================================================
 # CITY/TOPIC SEARCH PAGES
-#
-# These are public search URLs, not APIs.
-# They are additional discovery paths.
 # ============================================================
 
 SEARCH_TEMPLATES = [
@@ -430,6 +630,10 @@ SEARCH_TEMPLATES = [
     ),
 ]
 
+
+# ============================================================
+# SEARCH QUERIES
+# ============================================================
 
 def build_search_queries() -> list[str]:
 
@@ -473,7 +677,7 @@ def build_search_queries() -> list[str]:
             f"cybersecurity networking {city}"
         )
 
-    # Important community combinations.
+    # Community combinations.
     for city in INDIAN_CITIES:
 
         queries.append(
@@ -488,9 +692,10 @@ def build_search_queries() -> list[str]:
             f"BSides {city}"
         )
 
-    # Remove duplicates.
     return list(
-        dict.fromkeys(queries)
+        dict.fromkeys(
+            queries
+        )
     )
 
 
@@ -514,8 +719,6 @@ def collect_search_pages() -> list[Candidate]:
 
     candidates = []
 
-    # Limit per workflow to avoid excessive
-    # requests to public websites.
     max_queries = 80
 
     for number, query in enumerate(
@@ -587,10 +790,23 @@ def deduplicate(
         url = (
             candidate.url
             .strip()
-            .rstrip("/")
         )
 
+        # Remove URL fragments for deduplication.
+        url = url.split(
+            "#",
+            1
+        )[0]
+
+        url = url.rstrip("/")
+
         if not url:
+            continue
+
+        if is_invalid_link(
+            candidate.title,
+            candidate.url,
+        ):
             continue
 
         if url not in unique:
@@ -662,7 +878,6 @@ def collect_candidates() -> list[Candidate]:
     )
     print("=" * 60)
 
-    # Show first 50 only.
     for number, candidate in enumerate(
         candidates[:50],
         start=1,
