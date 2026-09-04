@@ -1,21 +1,152 @@
 ```python
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from collectors import collect_candidates
 from verifier import verify_event, verification_score
 from telegram import send_event_alert
 
 
-# Maximum number of Telegram alerts allowed in one run.
-# This prevents Telegram flooding if the scanner discovers
-# hundreds of events.
+# ------------------------------------------------------------
+# CONFIGURATION
+# ------------------------------------------------------------
+
+STATE_FILE = Path("sent_events.json")
+
+# Maximum number of NEW Telegram alerts per run.
 MAX_TELEGRAM_ALERTS_PER_RUN = 10
 
 
+# ------------------------------------------------------------
+# STATE MANAGEMENT
+# ------------------------------------------------------------
+
+def load_sent_urls() -> set[str]:
+    """
+    Load URLs that have already been successfully
+    sent to Telegram.
+    """
+
+    if not STATE_FILE.exists():
+        print(
+            "ℹ️ sent_events.json not found."
+        )
+
+        return set()
+
+    try:
+
+        with STATE_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            data = json.load(file)
+
+        sent_urls = data.get(
+            "sent_urls",
+            [],
+        )
+
+        if not isinstance(
+            sent_urls,
+            list,
+        ):
+            print(
+                "⚠️ Invalid sent_urls format."
+            )
+
+            return set()
+
+        return {
+            str(url).strip()
+            for url in sent_urls
+            if str(url).strip()
+        }
+
+    except (
+        json.JSONDecodeError,
+        OSError,
+    ) as exc:
+
+        print(
+            f"⚠️ Could not read "
+            f"{STATE_FILE}: {exc}"
+        )
+
+        return set()
+
+
+def save_sent_urls(
+    sent_urls: set[str],
+) -> bool:
+    """
+    Save successfully alerted event URLs.
+    """
+
+    try:
+
+        data = {
+            "sent_urls": sorted(
+                sent_urls
+            )
+        }
+
+        with STATE_FILE.open(
+            "w",
+            encoding="utf-8",
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        print(
+            f"💾 Saved "
+            f"{len(sent_urls)} "
+            f"sent event URLs."
+        )
+
+        return True
+
+    except OSError as exc:
+
+        print(
+            f"❌ Could not save "
+            f"{STATE_FILE}: {exc}"
+        )
+
+        return False
+
+
+# ------------------------------------------------------------
+# MAIN PIPELINE
+# ------------------------------------------------------------
+
 def run_pipeline():
+
     print("=" * 60)
-    print("🇮🇳 INDIA CYBERSECURITY EVENT PIPELINE")
+    print(
+        "🇮🇳 INDIA CYBERSECURITY EVENT PIPELINE"
+    )
     print("=" * 60)
+
+    # --------------------------------------------------------
+    # LOAD PREVIOUSLY SENT EVENTS
+    # --------------------------------------------------------
+
+    sent_urls = load_sent_urls()
+
+    print()
+    print(
+        f"📚 Previously sent events: "
+        f"{len(sent_urls)}"
+    )
 
     # --------------------------------------------------------
     # COLLECT
@@ -39,6 +170,7 @@ def run_pipeline():
         candidates,
         start=1,
     ):
+
         print()
         print(
             f"[{number}/{len(candidates)}]"
@@ -61,10 +193,12 @@ def run_pipeline():
         # ----------------------------------------------------
 
         if not result.reachable:
+
             print(
                 "   ❌ Rejected: "
                 "page unreachable"
             )
+
             continue
 
         # ----------------------------------------------------
@@ -72,10 +206,12 @@ def run_pipeline():
         # ----------------------------------------------------
 
         if score < 40:
+
             print(
                 f"   ⚠️ Low verification score: "
                 f"{score}/100"
             )
+
             continue
 
         # ----------------------------------------------------
@@ -122,10 +258,11 @@ def run_pipeline():
         )
 
     # --------------------------------------------------------
-    # REMOVE DUPLICATES FROM THIS RUN
+    # REMOVE DUPLICATES FROM CURRENT RUN
     # --------------------------------------------------------
 
     unique_verified = []
+
     seen_urls = set()
 
     for event in verified:
@@ -136,14 +273,19 @@ def run_pipeline():
             continue
 
         if url in seen_urls:
+
             print(
                 f"⚠️ Duplicate removed: "
                 f"{event['title']}"
             )
+
             continue
 
         seen_urls.add(url)
-        unique_verified.append(event)
+
+        unique_verified.append(
+            event
+        )
 
     verified = unique_verified
 
@@ -159,7 +301,7 @@ def run_pipeline():
     )
 
     # --------------------------------------------------------
-    # PRINT VERIFIED EVENTS
+    # PRINT SUMMARY
     # --------------------------------------------------------
 
     print()
@@ -170,125 +312,96 @@ def run_pipeline():
     )
     print("=" * 60)
 
-    for number, event in enumerate(
-        verified,
-        start=1,
-    ):
-        print()
-
-        print(
-            f"{number}. "
-            f"{event['title']}"
-        )
-
-        print(
-            f"   Source: "
-            f"{event['source']}"
-        )
-
-        print(
-            f"   Verification: "
-            f"{event['verification_score']}/100"
-        )
-
-        print(
-            f"   Registration: "
-            f"{event['has_registration']}"
-        )
-
-        print(
-            f"   Date signal: "
-            f"{event['has_date']}"
-        )
-
-        print(
-            f"   Future date: "
-            f"{event['has_future_date']}"
-        )
-
-        print(
-            f"   Location signal: "
-            f"{event['has_location']}"
-        )
-
-        print(
-            f"   India location: "
-            f"{event['has_india_location']}"
-        )
-
-        print(
-            f"   Online signal: "
-            f"{event['has_online_signal']}"
-        )
-
-        print(
-            f"   Detected dates: "
-            f"{event['detected_dates']}"
-        )
-
-        print(
-            f"   URL: "
-            f"{event['url']}"
-        )
-
     # --------------------------------------------------------
-    # TELEGRAM ALERTS
+    # FIND NEW EVENTS
     # --------------------------------------------------------
 
-    if not verified:
+    new_events = []
 
-        print()
-        print(
-            "ℹ️ No verified events found."
+    for event in verified:
+
+        url = event["url"].strip()
+
+        if url in sent_urls:
+
+            print(
+                f"↩️ Already sent: "
+                f"{event['title']}"
+            )
+
+            continue
+
+        new_events.append(
+            event
         )
-
-        print(
-            "ℹ️ No Telegram alerts sent."
-        )
-
-        return verified
 
     print()
     print("=" * 60)
     print(
-        "📨 SENDING TELEGRAM ALERTS"
+        f"🆕 NEW EVENTS: "
+        f"{len(new_events)}"
     )
     print("=" * 60)
 
     # --------------------------------------------------------
-    # LIMIT TELEGRAM ALERTS
+    # NO NEW EVENTS
     # --------------------------------------------------------
 
-    events_to_alert = verified[
+    if not new_events:
+
+        print()
+        print(
+            "ℹ️ No new cybersecurity events."
+        )
+
+        print(
+            "ℹ️ No Telegram alerts needed."
+        )
+
+        return verified
+
+    # --------------------------------------------------------
+    # LIMIT ALERTS
+    # --------------------------------------------------------
+
+    events_to_alert = new_events[
         :MAX_TELEGRAM_ALERTS_PER_RUN
     ]
 
     skipped_count = (
-        len(verified)
+        len(new_events)
         - len(events_to_alert)
     )
 
     print()
     print(
-        f"📊 Verified events: "
-        f"{len(verified)}"
+        f"📨 New events available: "
+        f"{len(new_events)}"
     )
 
     print(
-        f"📨 Maximum alerts this run: "
+        f"📨 Alerts allowed this run: "
         f"{MAX_TELEGRAM_ALERTS_PER_RUN}"
     )
 
     if skipped_count > 0:
 
         print(
-            f"⏭️ Alerts skipped this run: "
+            f"⏭️ New events waiting for "
+            f"future runs: "
             f"{skipped_count}"
         )
 
     # --------------------------------------------------------
-    # SEND ALERTS
+    # SEND TELEGRAM ALERTS
     # --------------------------------------------------------
+
+    print()
+    print("=" * 60)
+    print(
+        "📨 SENDING NEW TELEGRAM ALERTS"
+    )
+    print("=" * 60)
 
     successful_alerts = 0
 
@@ -300,7 +413,7 @@ def run_pipeline():
         print()
 
         print(
-            f"📨 Sending event "
+            f"📨 Sending new event "
             f"{number}/"
             f"{len(events_to_alert)}"
         )
@@ -310,16 +423,64 @@ def run_pipeline():
         )
 
         if success:
+
             successful_alerts += 1
 
+            # ----------------------------------------------
+            # IMPORTANT:
+            # Only mark as sent AFTER Telegram succeeds.
+            # ----------------------------------------------
+
+            sent_urls.add(
+                event["url"].strip()
+            )
+
+            print(
+                f"💾 Marked as sent: "
+                f"{event['title']}"
+            )
+
+        else:
+
+            print(
+                f"⚠️ NOT marked as sent: "
+                f"{event['title']}"
+            )
+
     # --------------------------------------------------------
-    # SUMMARY
+    # SAVE STATE
+    # --------------------------------------------------------
+
+    print()
+
+    if save_sent_urls(
+        sent_urls
+    ):
+
+        print(
+            "✅ Sent-event state saved."
+        )
+
+    else:
+
+        print(
+            "⚠️ Sent-event state could "
+            "not be saved."
+        )
+
+    # --------------------------------------------------------
+    # FINAL SUMMARY
     # --------------------------------------------------------
 
     print()
     print("=" * 60)
     print("📊 TELEGRAM SUMMARY")
     print("=" * 60)
+
+    print(
+        f"🆕 New events found: "
+        f"{len(new_events)}"
+    )
 
     print(
         f"📨 Alerts attempted: "
@@ -337,12 +498,21 @@ def run_pipeline():
     )
 
     print(
-        f"⏭️ Events not alerted: "
+        f"⏭️ New events waiting: "
         f"{skipped_count}"
+    )
+
+    print(
+        f"📚 Total recorded as sent: "
+        f"{len(sent_urls)}"
     )
 
     return verified
 
+
+# ------------------------------------------------------------
+# ENTRY POINT
+# ------------------------------------------------------------
 
 if __name__ == "__main__":
     run_pipeline()
