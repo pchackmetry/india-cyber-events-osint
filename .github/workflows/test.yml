@@ -53,8 +53,9 @@ jobs:
 
           git add sent_events.json
 
-          if git diff --cached --quiet; then
-            echo "ℹ️ No changes to sent_events.json"
+          if git diff --cached --quiet
+          then
+            echo "No changes to sent_events.json"
           else
             git commit -m "Update sent event state"
             git push
