@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import requests
 
 
@@ -31,38 +32,73 @@ def send_telegram(message: str) -> bool:
         "disable_web_page_preview": False,
     }
 
-    try:
+    max_retries = 3
 
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=20,
-        )
+    for attempt in range(max_retries):
 
-        if response.ok:
+        try:
 
-            print(
-                "✅ Telegram alert sent"
+            response = requests.post(
+                url,
+                json=payload,
+                timeout=20,
             )
 
-            return True
+            if response.ok:
 
-        print(
-            f"❌ Telegram error: "
-            f"{response.status_code} "
-            f"{response.text}"
-        )
+                print("✅ Telegram alert sent")
 
-        return False
+                # Small gap between messages
+                time.sleep(1)
 
-    except requests.RequestException as exc:
+                return True
 
-        print(
-            f"❌ Telegram request failed: "
-            f"{exc}"
-        )
+            if response.status_code == 429:
 
-        return False
+                try:
+                    data = response.json()
+                    retry_after = data.get(
+                        "parameters",
+                        {}
+                    ).get(
+                        "retry_after",
+                        60
+                    )
+                except Exception:
+                    retry_after = 60
+
+                print(
+                    f"⚠️ Telegram rate limit hit. "
+                    f"Waiting {retry_after} seconds..."
+                )
+
+                time.sleep(retry_after)
+
+                continue
+
+            print(
+                f"❌ Telegram error: "
+                f"{response.status_code} "
+                f"{response.text}"
+            )
+
+            return False
+
+        except requests.RequestException as exc:
+
+            print(
+                f"❌ Telegram request failed: "
+                f"{exc}"
+            )
+
+            return False
+
+    print(
+        "❌ Telegram failed after "
+        f"{max_retries} attempts"
+    )
+
+    return False
 
 
 def send_event_alert(event: dict) -> bool:
