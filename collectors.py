@@ -5,7 +5,7 @@ import requests
 
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse, parse_qs, unquote
 
 
 # ============================================================
@@ -144,7 +144,12 @@ INVALID_LINK_TEXT = {
     "browse events",
     "view all events",
     "see all events",
+    "discover events",
+    "discover",
+    "event search",
+    "search events",
 }
+
 
 INVALID_FRAGMENT_NAMES = {
     "#global",
@@ -189,9 +194,7 @@ DIRECT_SOURCES = [
 # ============================================================
 
 def fetch(url: str) -> str | None:
-
     try:
-
         response = requests.get(
             url,
             headers=HEADERS,
@@ -210,19 +213,11 @@ def fetch(url: str) -> str | None:
         return response.text
 
     except requests.RequestException as exc:
-
-        print(
-            f"   ❌ Request error: {exc}"
-        )
-
+        print(f"   ❌ Request error: {exc}")
         return None
 
     except Exception as exc:
-
-        print(
-            f"   ❌ Unexpected error: {exc}"
-        )
-
+        print(f"   ❌ Unexpected error: {exc}")
         return None
 
 
@@ -231,16 +226,155 @@ def fetch(url: str) -> str | None:
 # ============================================================
 
 def normalize(text: str) -> str:
-
     text = text.lower()
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text,
-    )
-
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+# ============================================================
+# URL CLEANING
+# ============================================================
+
+def clean_url(url: str) -> str:
+    """
+    Normalize a URL without following it over the network.
+
+    Important:
+    Meetup search pages sometimes expose registration/login
+    redirects instead of the real event URL.
+    """
+
+    if not url:
+        return ""
+
+    url = url.strip()
+
+    # --------------------------------------------------------
+    # Decode repeated URL encoding.
+    # --------------------------------------------------------
+
+    previous = None
+
+    for _ in range(3):
+        if url == previous:
+            break
+
+        previous = url
+
+        try:
+            decoded = unquote(url)
+
+            if decoded == url:
+                break
+
+            url = decoded
+
+        except Exception:
+            break
+
+    # --------------------------------------------------------
+    # Meetup registration redirect.
+    #
+    # Example:
+    # /register/?returnUri=https%3A%2F%2Fwww.meetup.com%2F...
+    #
+    # Convert to the actual Meetup event URL.
+    # --------------------------------------------------------
+
+    try:
+        parsed = urlparse(url)
+
+        host = parsed.netloc.lower()
+
+        if (
+            "meetup.com" in host
+            and parsed.path.rstrip("/").lower() == "/register"
+        ):
+            query = parse_qs(parsed.query)
+
+            return_uri = query.get("returnUri")
+
+            if return_uri:
+                target = return_uri[0]
+
+                # Decode again in case returnUri itself is encoded.
+                for _ in range(3):
+                    decoded_target = unquote(target)
+
+                    if decoded_target == target:
+                        break
+
+                    target = decoded_target
+
+                target_parsed = urlparse(target)
+
+                if (
+                    "meetup.com" in target_parsed.netloc.lower()
+                    and "/events/" in target_parsed.path.lower()
+                ):
+                    cleaned_target = (
+                        f"https://www.meetup.com"
+                        f"{target_parsed.path}"
+                    )
+
+                    if target_parsed.query:
+                        # Keep useful event query parameters only.
+                        useful_query = []
+
+                        for key, values in parse_qs(
+                            target_parsed.query
+                        ).items():
+                            if key.lower() in {
+                                "eventorigin",
+                                "recid",
+                                "recsource",
+                            }:
+                                for value in values:
+                                    useful_query.append(
+                                        f"{quote(key)}={quote(value)}"
+                                    )
+
+                        if useful_query:
+                            cleaned_target += (
+                                "?" + "&".join(useful_query)
+                            )
+
+                    print(
+                        "      🔄 Meetup registration redirect -> "
+                        f"{cleaned_target}"
+                    )
+
+                    return cleaned_target
+
+    except Exception:
+        pass
+
+    # --------------------------------------------------------
+    # Remove fragments.
+    # --------------------------------------------------------
+
+    url = url.split("#", 1)[0]
+
+    return url.strip()
+
+
+# ============================================================
+# MEETUP REDIRECT DETECTION
+# ============================================================
+
+def resolve_meetup_registration_url(url: str) -> str:
+    """
+    Extract the real Meetup event URL from a registration URL.
+
+    Does NOT make another HTTP request.
+    """
+
+    cleaned = clean_url(url)
+
+    if cleaned != url:
+        return cleaned
+
+    return url
 
 
 # ============================================================
@@ -252,14 +386,32 @@ def is_invalid_link(
     url: str,
 ) -> bool:
 
-    clean_title = normalize(
-        title
-    )
+    clean_title = normalize(title)
+    clean_url_value = clean_url(url).lower()
 
-    clean_url = (
-        url.strip()
-        .lower()
-    )
+    if not clean_url_value:
+        return True
+
+    # --------------------------------------------------------
+    # Reject Meetup login/register pages that could not be
+    # converted to a real event URL.
+    # --------------------------------------------------------
+
+    try:
+        parsed = urlparse(clean_url_value)
+
+        if (
+            "meetup.com" in parsed.netloc
+            and parsed.path.rstrip("/").lower() in {
+                "/register",
+                "/login",
+                "/signin",
+            }
+        ):
+            return True
+
+    except Exception:
+        pass
 
     # --------------------------------------------------------
     # Reject fragment-only OWASP section links.
@@ -267,14 +419,8 @@ def is_invalid_link(
 
     fragment = ""
 
-    if "#" in clean_url:
-        fragment = (
-            "#"
-            + clean_url.split(
-                "#",
-                1
-            )[1]
-        )
+    if "#" in clean_url_value:
+        fragment = "#" + clean_url_value.split("#", 1)[1]
 
     if fragment in INVALID_FRAGMENT_NAMES:
         return True
@@ -292,10 +438,8 @@ def is_invalid_link(
 
     listing_patterns = [
         r"/events/?$",
-        r"/events/$",
         r"/events/#",
-        r"/event/",
-        r"/events\?",
+        r"/event/$",
         r"/search",
         r"/discover",
         r"/calendar",
@@ -303,13 +447,13 @@ def is_invalid_link(
         r"/archive",
         r"/directory",
         r"/chapters/?$",
+        r"/find/?$",
     ]
 
     for pattern in listing_patterns:
-
         if re.search(
             pattern,
-            clean_url,
+            clean_url_value,
             flags=re.IGNORECASE,
         ):
             return True
@@ -354,35 +498,93 @@ def detect_location(
     text: str,
 ) -> str:
 
-    normalized = normalize(
-        text
-    )
+    normalized = normalize(text)
 
     for city in INDIAN_CITIES:
 
         if city.lower() in normalized:
-
             return city
 
         if city == "Bengaluru":
 
             if "bangalore" in normalized:
-
                 return "Bengaluru"
 
     if "india" in normalized:
-
         return "India"
 
     if "online" in normalized:
-
         return "Online"
 
     if "virtual" in normalized:
-
         return "Online"
 
     return "Unknown"
+
+
+# ============================================================
+# PLATFORM EVENT URL VALIDATION
+# ============================================================
+
+def is_real_event_url(
+    url: str,
+) -> bool:
+
+    try:
+        parsed = urlparse(url)
+
+        host = parsed.netloc.lower()
+        path = parsed.path.lower()
+
+        # ----------------------------------------------------
+        # Meetup
+        # ----------------------------------------------------
+
+        if "meetup.com" in host:
+
+            return bool(
+                re.search(
+                    r"/events/\d+",
+                    path,
+                )
+            )
+
+        # ----------------------------------------------------
+        # Luma
+        # ----------------------------------------------------
+
+        if "lu.ma" in host:
+
+            # Luma event URLs normally look like:
+            # https://lu.ma/xxxxx
+            #
+            # Exclude obvious listing pages.
+            if path.rstrip("/") in {
+                "",
+                "/discover",
+                "/search",
+            }:
+                return False
+
+            return True
+
+        # ----------------------------------------------------
+        # Eventbrite
+        # ----------------------------------------------------
+
+        if "eventbrite." in host:
+
+            return bool(
+                re.search(
+                    r"/e/[^/]+",
+                    path,
+                )
+            )
+
+    except Exception:
+        return False
+
+    return True
 
 
 # ============================================================
@@ -401,6 +603,15 @@ def extract_links(
     )
 
     candidates = []
+
+    normalized_base = (
+        clean_url(base_url)
+        .split("#", 1)[0]
+        .rstrip("/")
+        .lower()
+    )
+
+    seen_urls = set()
 
     for link in soup.find_all(
         "a",
@@ -428,13 +639,25 @@ def extract_links(
             href,
         )
 
-        if not url.startswith(
-            "http"
-        ):
+        if not url.startswith("http"):
             continue
 
         # ----------------------------------------------------
         # IMPORTANT:
+        # Convert Meetup registration URLs BEFORE validation.
+        # ----------------------------------------------------
+
+        original_url = url
+
+        url = resolve_meetup_registration_url(url)
+
+        if url != original_url:
+            print(
+                f"      🔄 Converted redirect: "
+                f"{original_url} -> {url}"
+            )
+
+        # ----------------------------------------------------
         # Reject source/index/section links BEFORE
         # cybersecurity detection.
         # ----------------------------------------------------
@@ -452,18 +675,28 @@ def extract_links(
             continue
 
         # ----------------------------------------------------
+        # Platform-specific event URL validation.
+        #
+        # This prevents generic search/listing links from
+        # entering the expensive verifier.
+        # ----------------------------------------------------
+
+        if source_name in {
+            "Meetup",
+            "Luma",
+            "Eventbrite",
+        }:
+
+            if not is_real_event_url(url):
+
+                continue
+
+        # ----------------------------------------------------
         # Reject links that point back to the same page.
         # ----------------------------------------------------
 
-        normalized_base = (
-            base_url
-            .split("#", 1)[0]
-            .rstrip("/")
-            .lower()
-        )
-
         normalized_url = (
-            url
+            clean_url(url)
             .split("#", 1)[0]
             .rstrip("/")
             .lower()
@@ -477,6 +710,15 @@ def extract_links(
             )
 
             continue
+
+        # ----------------------------------------------------
+        # Deduplicate immediately.
+        # ----------------------------------------------------
+
+        if normalized_url in seen_urls:
+            continue
+
+        seen_urls.add(normalized_url)
 
         # ----------------------------------------------------
         # Build nearby context.
@@ -494,6 +736,7 @@ def extract_links(
             )
 
         # Also inspect the closest useful container.
+
         container_text = ""
 
         for parent_level in (
@@ -516,9 +759,7 @@ def extract_links(
                     parent_text
                 ):
 
-                    parent_text = (
-                        container_text
-                    )
+                    parent_text = container_text
 
         context = (
             f"{title} "
@@ -534,7 +775,6 @@ def extract_links(
             title,
             context,
         ):
-
             continue
 
         location = detect_location(
@@ -639,14 +879,20 @@ def build_search_queries() -> list[str]:
 
     queries = []
 
+    # --------------------------------------------------------
     # General India searches.
+    # --------------------------------------------------------
+
     for topic in CYBER_TOPICS:
 
         queries.append(
             f"{topic} India event"
         )
 
+    # --------------------------------------------------------
     # City + cybersecurity.
+    # --------------------------------------------------------
+
     for city in INDIAN_CITIES:
 
         queries.append(
@@ -677,7 +923,10 @@ def build_search_queries() -> list[str]:
             f"cybersecurity networking {city}"
         )
 
+    # --------------------------------------------------------
     # Community combinations.
+    # --------------------------------------------------------
+
     for city in INDIAN_CITIES:
 
         queries.append(
@@ -787,12 +1036,10 @@ def deduplicate(
 
     for candidate in candidates:
 
-        url = (
+        url = clean_url(
             candidate.url
-            .strip()
         )
 
-        # Remove URL fragments for deduplication.
         url = url.split(
             "#",
             1
@@ -805,13 +1052,40 @@ def deduplicate(
 
         if is_invalid_link(
             candidate.title,
-            candidate.url,
+            url,
         ):
+            continue
+
+        # ----------------------------------------------------
+        # Extra protection against Meetup register URLs.
+        # ----------------------------------------------------
+
+        try:
+
+            parsed = urlparse(url)
+
+            if (
+                "meetup.com" in parsed.netloc.lower()
+                and parsed.path.rstrip("/").lower()
+                in {
+                    "/register",
+                    "/login",
+                    "/signin",
+                }
+            ):
+                continue
+
+        except Exception:
             continue
 
         if url not in unique:
 
-            unique[url] = candidate
+            unique[url] = Candidate(
+                title=candidate.title.strip(),
+                url=url,
+                source=candidate.source,
+                description=candidate.description,
+            )
 
     return list(
         unique.values()
@@ -868,14 +1142,17 @@ def collect_candidates() -> list[Candidate]:
 
     print()
     print("=" * 60)
+
     print(
         f"📦 RAW CANDIDATES: "
         f"{len(all_candidates)}"
     )
+
     print(
         f"✅ UNIQUE CANDIDATES: "
         f"{len(candidates)}"
     )
+
     print("=" * 60)
 
     for number, candidate in enumerate(
@@ -884,6 +1161,7 @@ def collect_candidates() -> list[Candidate]:
     ):
 
         print()
+
         print(
             f"[{number}] "
             f"{candidate.title}"
@@ -906,6 +1184,7 @@ def collect_candidates() -> list[Candidate]:
     if len(candidates) > 50:
 
         print()
+
         print(
             f"... and "
             f"{len(candidates) - 50} "
@@ -920,5 +1199,4 @@ def collect_candidates() -> list[Candidate]:
 # ============================================================
 
 if __name__ == "__main__":
-
     collect_candidates()
