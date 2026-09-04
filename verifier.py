@@ -27,6 +27,7 @@ CYBER_KEYWORDS = {
     "cloud security",
     "network security",
     "security operations",
+    "security operation",
     "soc",
     "incident response",
     "threat intelligence",
@@ -59,7 +60,18 @@ CYBER_KEYWORDS = {
     "threat hunting",
     "secure coding",
     "software security",
-    "application security",
+    "secure software",
+    "cloud security",
+    "api security",
+    "web security",
+    "mobile security",
+    "endpoint security",
+    "digital identity",
+    "cyber risk",
+    "security testing",
+    "security awareness",
+    "security compliance",
+    "grc",
 }
 
 EVENT_KEYWORDS = {
@@ -81,6 +93,13 @@ EVENT_KEYWORDS = {
     "congress",
     "conclave",
     "competition",
+    "session",
+    "talk",
+    "discussion",
+    "fireside",
+    "panel",
+    "presentation",
+    "keynote",
 }
 
 INDIA_KEYWORDS = {
@@ -130,12 +149,12 @@ NON_INDIA_COUNTRIES = {
     "united states",
     "united states of america",
     "usa",
-    "us",
+    "u.s.a.",
     "u.s.",
     "canada",
     "united kingdom",
-    "uk",
     "u.k.",
+    "uk",
     "australia",
     "new zealand",
     "germany",
@@ -161,6 +180,28 @@ NON_INDIA_COUNTRIES = {
     "dubai",
     "qatar",
     "saudi arabia",
+    "mexico",
+    "mexico city",
+    "brazil",
+    "argentina",
+    "colombia",
+    "south africa",
+    "egypt",
+    "philippines",
+    "indonesia",
+    "malaysia",
+    "thailand",
+    "vietnam",
+    "taiwan",
+    "poland",
+    "portugal",
+    "austria",
+    "switzerland",
+    "czech republic",
+    "czechia",
+    "romania",
+    "turkey",
+    "israel",
 }
 
 ONLINE_KEYWORDS = {
@@ -173,6 +214,14 @@ ONLINE_KEYWORDS = {
     "online conference",
     "virtual conference",
     "online webinar",
+    "online meetup",
+    "virtual meetup",
+    "livestream",
+    "live stream",
+    "zoom",
+    "google meet",
+    "microsoft teams",
+    "teams meeting",
 }
 
 HYBRID_KEYWORDS = {
@@ -181,6 +230,8 @@ HYBRID_KEYWORDS = {
     "online & in-person",
     "virtual and in-person",
     "virtual & in-person",
+    "in-person and online",
+    "in person and online",
 }
 
 LISTING_PAGE_KEYWORDS = {
@@ -207,6 +258,8 @@ LISTING_PAGE_KEYWORDS = {
     "previous events",
     "event categories",
     "events by category",
+    "event discovery",
+    "discover events",
 }
 
 PRICE_FALSE_POSITIVES = {
@@ -221,10 +274,28 @@ PRICE_FALSE_POSITIVES = {
     "£",
 }
 
+DATE_CONTEXT_WORDS = {
+    "event",
+    "conference",
+    "summit",
+    "webinar",
+    "workshop",
+    "meetup",
+    "seminar",
+    "session",
+    "training",
+    "hackathon",
+    "starts",
+    "starting",
+    "date",
+    "when",
+    "on",
+}
 
 # ============================================================
 # RESULT MODEL
 # ============================================================
+
 
 @dataclass
 class VerificationResult:
@@ -283,6 +354,7 @@ class VerificationResult:
 # BASIC HELPERS
 # ============================================================
 
+
 def normalize_space(value: Any) -> str:
     if value is None:
         return ""
@@ -311,6 +383,16 @@ def contains_keyword(text: str, keywords: set[str]) -> bool:
     text = text.lower()
 
     return any(keyword in text for keyword in keywords)
+
+
+def keyword_matches(text: str, keywords: set[str]) -> list[str]:
+    lowered = text.lower()
+
+    return [
+        keyword
+        for keyword in keywords
+        if keyword in lowered
+    ]
 
 
 def safe_get(data: dict[str, Any], *keys: str) -> Any:
@@ -342,16 +424,31 @@ def valid_url(value: str) -> bool:
     )
 
 
+def clean_url(value: str) -> str:
+    value = clean_text(value)
+
+    if not value:
+        return ""
+
+    return value.split("#", 1)[0]
+
+
 # ============================================================
 # HTML FETCHING
 # ============================================================
+
 
 def fetch_page(url: str) -> tuple[bool, str, str]:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (compatible; "
             "India-Cybersecurity-OSINT-Scanner/1.0)"
-        )
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     try:
@@ -378,28 +475,37 @@ def fetch_page(url: str) -> tuple[bool, str, str]:
 # JSON-LD
 # ============================================================
 
+
 def flatten_jsonld(value: Any) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
 
     if isinstance(value, dict):
         if "@graph" in value:
-            output.extend(flatten_jsonld(value["@graph"]))
+            output.extend(
+                flatten_jsonld(value["@graph"])
+            )
 
         if "@type" in value:
             output.append(value)
 
         for item in value.values():
             if isinstance(item, (dict, list)):
-                output.extend(flatten_jsonld(item))
+                output.extend(
+                    flatten_jsonld(item)
+                )
 
     elif isinstance(value, list):
         for item in value:
-            output.extend(flatten_jsonld(item))
+            output.extend(
+                flatten_jsonld(item)
+            )
 
     return output
 
 
-def extract_jsonld(soup: BeautifulSoup) -> list[dict[str, Any]]:
+def extract_jsonld(
+    soup: BeautifulSoup,
+) -> list[dict[str, Any]]:
     objects: list[dict[str, Any]] = []
 
     for script in soup.find_all(
@@ -413,9 +519,16 @@ def extract_jsonld(soup: BeautifulSoup) -> list[dict[str, Any]]:
 
         try:
             data = json.loads(raw)
-            objects.extend(flatten_jsonld(data))
 
-        except (json.JSONDecodeError, TypeError):
+            objects.extend(
+                flatten_jsonld(data)
+            )
+
+        except (
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ):
             continue
 
     return objects
@@ -423,11 +536,22 @@ def extract_jsonld(soup: BeautifulSoup) -> list[dict[str, Any]]:
 
 def is_event_type(value: Any) -> bool:
     if isinstance(value, list):
-        return any(is_event_type(item) for item in value)
+        return any(
+            is_event_type(item)
+            for item in value
+        )
 
     value = clean_text(value).lower()
 
-    return value == "event" or value.endswith("event")
+    return (
+        value == "event"
+        or value.endswith("event")
+        or value in {
+            "business event",
+            "education event",
+            "social event",
+        }
+    )
 
 
 def find_structured_event(
@@ -444,6 +568,7 @@ def find_structured_event(
 # DATE EXTRACTION
 # ============================================================
 
+
 MONTHS = (
     "January|February|March|April|May|June|July|August|"
     "September|October|November|December"
@@ -454,8 +579,22 @@ MONTH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+MONTH_DAY_YEAR_PATTERN = re.compile(
+    rf"\b(?:{MONTHS})\s+\d{{1,2}},\s*\d{{4}}\b",
+    re.IGNORECASE,
+)
+
+DAY_MONTH_YEAR_PATTERN = re.compile(
+    rf"\b\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}\b",
+    re.IGNORECASE,
+)
+
 NUMERIC_DATE_PATTERN = re.compile(
     r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
+)
+
+ISO_DATE_PATTERN = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}\b"
 )
 
 
@@ -486,7 +625,8 @@ def parse_date_string(value: Any) -> str:
             pass
 
     month_match = re.search(
-        rf"\b({MONTHS})\s+(\d{{1,2}})(?:,\s*(\d{{4}}))?\b",
+        rf"\b({MONTHS})\s+(\d{{1,2}})"
+        rf"(?:,\s*(\d{{4}}))?\b",
         value,
         flags=re.IGNORECASE,
     )
@@ -498,6 +638,27 @@ def parse_date_string(value: Any) -> str:
                 f"{month_match.group(2)} "
                 f"{month_match.group(3)}",
                 "%B %d %Y",
+            ).date()
+
+            return dt.strftime("%d %B %Y")
+
+        except ValueError:
+            pass
+
+    day_month_match = re.search(
+        rf"\b(\d{{1,2}})\s+({MONTHS})"
+        rf"\s+(\d{{4}})\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    if day_month_match:
+        try:
+            dt = datetime.strptime(
+                f"{day_month_match.group(1)} "
+                f"{day_month_match.group(2)} "
+                f"{day_month_match.group(3)}",
+                "%d %B %Y",
             ).date()
 
             return dt.strftime("%d %B %Y")
@@ -519,7 +680,10 @@ def parse_date_string(value: Any) -> str:
             "%m/%d/%y",
         ):
             try:
-                dt = datetime.strptime(raw, fmt).date()
+                dt = datetime.strptime(
+                    raw,
+                    fmt,
+                ).date()
 
                 return dt.strftime("%d %B %Y")
 
@@ -554,25 +718,81 @@ def parse_iso_date(value: Any) -> date | None:
         return None
 
 
-def extract_dates_from_text(text: str) -> list[str]:
+def extract_dates_from_text(
+    text: str,
+) -> list[str]:
     results: list[str] = []
 
-    for match in MONTH_PATTERN.finditer(text):
-        parsed = parse_date_string(match.group(0))
+    patterns = (
+        MONTH_DAY_YEAR_PATTERN,
+        DAY_MONTH_YEAR_PATTERN,
+        MONTH_PATTERN,
+        NUMERIC_DATE_PATTERN,
+        ISO_DATE_PATTERN,
+    )
 
-        if parsed and parsed not in results:
-            results.append(parsed)
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            parsed = parse_date_string(
+                match.group(0)
+            )
 
-    for match in NUMERIC_DATE_PATTERN.finditer(text):
-        parsed = parse_date_string(match.group(0))
-
-        if parsed and parsed not in results:
-            results.append(parsed)
+            if parsed and parsed not in results:
+                results.append(parsed)
 
     return results
 
 
-def date_is_current_or_future(date_text: str) -> bool:
+def extract_primary_date_from_text(
+    text: str,
+) -> tuple[str, str]:
+    """
+    Extract the most likely event date.
+
+    Priority:
+    1. Explicit event/date/start labels.
+    2. Platform-style date phrases.
+    3. First valid date.
+    """
+
+    labeled_patterns = [
+        r"(?:event\s+date|date|starts?|start(?:s)?\s+on)"
+        r"\s*[:\-]?\s*"
+        rf"({MONTHS}\s+\d{{1,2}}(?:,\s*\d{{4}})?)",
+        r"(?:event\s+date|date|starts?|start(?:s)?\s+on)"
+        r"\s*[:\-]?\s*"
+        rf"(\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})",
+        r"(?:event\s+date|date|starts?|start(?:s)?\s+on)"
+        r"\s*[:\-]?\s*"
+        r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+    ]
+
+    for pattern in labeled_patterns:
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            parsed = parse_date_string(
+                match.group(1)
+            )
+
+            if parsed:
+                return parsed, "Page text"
+
+    dates = extract_dates_from_text(text)
+
+    if dates:
+        return dates[0], "Page text"
+
+    return "", ""
+
+
+def date_is_current_or_future(
+    date_text: str,
+) -> bool:
     parsed = parse_date_string(date_text)
 
     if not parsed:
@@ -607,8 +827,13 @@ def extract_structured_dates(
         "end",
     )
 
-    start_date = parse_date_string(start_raw)
-    end_date = parse_date_string(end_raw)
+    start_date = parse_date_string(
+        start_raw
+    )
+
+    end_date = parse_date_string(
+        end_raw
+    )
 
     return start_date, end_date
 
@@ -617,13 +842,18 @@ def extract_structured_dates(
 # LOCATION
 # ============================================================
 
+
 def structured_location(
     event: dict[str, Any],
 ) -> tuple[str, str, str, str, str]:
     location = event.get("location")
 
     if isinstance(location, list):
-        location = location[0] if location else {}
+        location = (
+            location[0]
+            if location
+            else {}
+        )
 
     if isinstance(location, str):
         return (
@@ -637,12 +867,32 @@ def structured_location(
     if not isinstance(location, dict):
         return "", "", "", "", ""
 
-    address = location.get("address", {})
+    address = location.get(
+        "address",
+        {},
+    )
 
     if isinstance(address, str):
+        name = clean_text(
+            safe_get(
+                location,
+                "name",
+                "venue",
+            )
+        )
+
+        location_text = ", ".join(
+            item
+            for item in (
+                name,
+                clean_text(address),
+            )
+            if item
+        )
+
         return (
-            clean_text(address),
-            "",
+            location_text,
+            name,
             "",
             "",
             "",
@@ -683,6 +933,17 @@ def structured_location(
         )
     )
 
+    if isinstance(
+        event.get("location"),
+        dict,
+    ):
+        location_name = clean_text(
+            event["location"].get("name")
+        )
+
+        if location_name and not name:
+            name = location_name
+
     street = clean_text(
         safe_get(
             address,
@@ -700,7 +961,9 @@ def structured_location(
     ]
 
     location_text = ", ".join(
-        item for item in parts if item
+        item
+        for item in parts
+        if item
     )
 
     return (
@@ -715,21 +978,15 @@ def structured_location(
 def extract_location_from_text(
     text: str,
 ) -> tuple[str, str, str]:
-    online = contains_keyword(
-        text,
-        ONLINE_KEYWORDS,
-    )
-
-    if online:
-        return (
-            "Online / Virtual",
-            "",
-            "",
-        )
-
     patterns = [
-        r"(?:location|venue|where)\s*[:\-]\s*([^|.\n]{3,160})",
-        r"(?:held at|taking place at)\s+([^|.\n]{3,160})",
+        r"(?:location|venue|where)\s*[:\-]\s*"
+        r"([^|.\n]{3,160})",
+        r"(?:held at|taking place at)\s+"
+        r"([^|.\n]{3,160})",
+        r"(?:at)\s+"
+        r"([A-Z][^|.\n]{3,120}),\s*"
+        r"(Hyderabad|Bengaluru|Bangalore|Chennai|Mumbai|Pune|"
+        r"Delhi|Noida|Gurgaon|Gurugram|Kolkata|Ahmedabad|Jaipur)",
     ]
 
     for pattern in patterns:
@@ -742,14 +999,41 @@ def extract_location_from_text(
         if not match:
             continue
 
-        value = normalize_space(match.group(1))
+        value = normalize_space(
+            match.group(0)
+        )
 
-        if len(value) > 160:
+        if len(value) > 180:
             continue
+
+        city = ""
+
+        for candidate in INDIA_KEYWORDS:
+            if candidate in value.lower():
+                if candidate not in {
+                    "india",
+                    "indian",
+                    "telangana",
+                    "karnataka",
+                    "tamil nadu",
+                    "maharashtra",
+                    "kerala",
+                    "andhra pradesh",
+                    "uttar pradesh",
+                    "west bengal",
+                    "rajasthan",
+                    "gujarat",
+                    "odisha",
+                    "haryana",
+                    "punjab",
+                    "delhi ncr",
+                }:
+                    city = candidate.title()
+                    break
 
         return (
             value,
-            "",
+            city,
             "",
         )
 
@@ -760,11 +1044,14 @@ def extract_location_from_text(
 # EVENT MODE
 # ============================================================
 
+
 def detect_event_mode(
     text: str,
     location: str,
 ) -> str:
-    combined = f"{text} {location}".lower()
+    combined = (
+        f"{text} {location}"
+    ).lower()
 
     if contains_keyword(
         combined,
@@ -785,6 +1072,7 @@ def detect_event_mode(
 # COUNTRY / INDIA VALIDATION
 # ============================================================
 
+
 def detect_foreign_location(
     text: str,
 ) -> str:
@@ -795,9 +1083,16 @@ def detect_foreign_location(
         key=len,
         reverse=True,
     ):
-        pattern = r"(?<![a-z])" + re.escape(country) + r"(?![a-z])"
+        pattern = (
+            r"(?<![a-z])"
+            + re.escape(country)
+            + r"(?![a-z])"
+        )
 
-        if re.search(pattern, lowered):
+        if re.search(
+            pattern,
+            lowered,
+        ):
             return country
 
     return ""
@@ -808,24 +1103,52 @@ def detect_india_location(
     page_text: str,
     event_mode: str,
 ) -> bool:
-    location_lower = location_text.lower()
-    page_lower = page_text.lower()
+    location_lower = (
+        location_text or ""
+    ).lower()
+
+    page_lower = (
+        page_text or ""
+    ).lower()
+
+    foreign = detect_foreign_location(
+        location_lower
+    )
+
+    if foreign:
+        return False
 
     if event_mode == "Online":
+        # Online events are accepted only when
+        # the page provides an India signal or
+        # does not provide a foreign-country signal.
+        #
+        # We separately reject clearly foreign
+        # online events below.
+        if contains_keyword(
+            page_lower,
+            INDIA_KEYWORDS,
+        ):
+            return True
+
+        if detect_foreign_location(
+            page_lower
+        ):
+            return False
+
         return True
 
     if event_mode == "Hybrid":
         return contains_keyword(
             location_lower,
             INDIA_KEYWORDS,
+        ) or contains_keyword(
+            page_lower,
+            {
+                "india",
+                "indian",
+            },
         )
-
-    foreign = detect_foreign_location(
-        location_lower,
-    )
-
-    if foreign:
-        return False
 
     return contains_keyword(
         location_lower,
@@ -836,6 +1159,7 @@ def detect_india_location(
 # ============================================================
 # TIME
 # ============================================================
+
 
 def extract_time(
     event: dict[str, Any],
@@ -883,20 +1207,29 @@ def extract_time(
 # ORGANIZER
 # ============================================================
 
+
 def extract_organizer(
     event: dict[str, Any],
     text: str,
 ) -> str:
-    organizer = event.get("organizer")
+    organizer = event.get(
+        "organizer"
+    )
 
-    if isinstance(organizer, list):
+    if isinstance(
+        organizer,
+        list,
+    ):
         organizer = (
             organizer[0]
             if organizer
             else {}
         )
 
-    if isinstance(organizer, dict):
+    if isinstance(
+        organizer,
+        dict,
+    ):
         value = clean_text(
             safe_get(
                 organizer,
@@ -908,17 +1241,29 @@ def extract_organizer(
         if value:
             return value
 
-    if isinstance(organizer, str):
-        value = clean_text(organizer)
+    if isinstance(
+        organizer,
+        str,
+    ):
+        value = clean_text(
+            organizer
+        )
 
         if value:
             return value
 
     patterns = [
-        r"organizer\s*[:\-]\s*([^|.\n]{2,100})",
-        r"organised by\s+([^|.\n]{2,100})",
-        r"organized by\s+([^|.\n]{2,100})",
-        r"hosted by\s+([^|.\n]{2,100})",
+        r"organizer\s*[:\-]\s*"
+        r"([^|.\n]{2,100})",
+        r"organised by\s+"
+        r"([^|.\n]{2,100})",
+        r"organized by\s+"
+        r"([^|.\n]{2,100})",
+        r"hosted by\s+"
+        r"([^|.\n]{2,100})",
+        r"\bby\s+"
+        r"([A-Z][A-Za-z0-9&.' -]{2,80})"
+        r"(?:\s+at\s+|\s+\d|\s*$)",
     ]
 
     for pattern in patterns:
@@ -929,9 +1274,12 @@ def extract_organizer(
         )
 
         if match:
-            return normalize_space(
+            value = normalize_space(
                 match.group(1)
             )
+
+            if value:
+                return value
 
     return ""
 
@@ -939,6 +1287,7 @@ def extract_organizer(
 # ============================================================
 # EVENT TYPE
 # ============================================================
+
 
 def extract_event_type(
     event: dict[str, Any],
@@ -952,7 +1301,10 @@ def extract_event_type(
         )
     )
 
-    if value and value.lower() != "event":
+    if (
+        value
+        and value.lower() != "event"
+    ):
         return value
 
     lowered = text.lower()
@@ -974,6 +1326,10 @@ def extract_event_type(
         "masterclass",
         "congress",
         "conclave",
+        "session",
+        "talk",
+        "panel",
+        "keynote",
     ):
         if event_type in lowered:
             return event_type.title()
@@ -985,16 +1341,29 @@ def extract_event_type(
 # PRICE
 # ============================================================
 
+
 def extract_price(
     event: dict[str, Any],
     text: str,
 ) -> str:
-    offers = event.get("offers")
+    offers = event.get(
+        "offers"
+    )
 
-    if isinstance(offers, list):
-        offers = offers[0] if offers else {}
+    if isinstance(
+        offers,
+        list,
+    ):
+        offers = (
+            offers[0]
+            if offers
+            else {}
+        )
 
-    if isinstance(offers, dict):
+    if isinstance(
+        offers,
+        dict,
+    ):
         price = clean_text(
             safe_get(
                 offers,
@@ -1011,9 +1380,9 @@ def extract_price(
             )
         )
 
-        if price and re.search(
-            r"\d",
-            price,
+        if (
+            price
+            and re.search(r"\d", price)
         ):
             return (
                 f"{currency} {price}".strip()
@@ -1022,8 +1391,10 @@ def extract_price(
             )
 
     patterns = [
-        r"(?:₹|INR|Rs\.?|USD|\$|EUR|€|GBP|£)\s*[\d,]+(?:\.\d{1,2})?",
-        r"[\d,]+(?:\.\d{1,2})?\s*(?:INR|USD|EUR|GBP)",
+        r"(?:₹|INR|Rs\.?|USD|\$|EUR|€|GBP|£)"
+        r"\s*[\d,]+(?:\.\d{1,2})?",
+        r"[\d,]+(?:\.\d{1,2})?"
+        r"\s*(?:INR|USD|EUR|GBP)",
     ]
 
     for pattern in patterns:
@@ -1038,7 +1409,10 @@ def extract_price(
                 match.group(0)
             )
 
-            if value.lower().strip() in PRICE_FALSE_POSITIVES:
+            if (
+                value.lower().strip()
+                in PRICE_FALSE_POSITIVES
+            ):
                 continue
 
             if not re.search(
@@ -1063,6 +1437,7 @@ def extract_price(
 # REGISTRATION
 # ============================================================
 
+
 def extract_registration_url(
     soup: BeautifulSoup,
     base_url: str,
@@ -1076,11 +1451,19 @@ def extract_registration_url(
         "book now",
         "attend",
         "join event",
+        "get tickets",
+        "reserve",
     )
 
-    for link in soup.find_all("a", href=True):
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
         label = normalize_space(
-            link.get_text(" ", strip=True)
+            link.get_text(
+                " ",
+                strip=True,
+            )
         ).lower()
 
         href = absolute_url(
@@ -1104,6 +1487,7 @@ def extract_registration_url(
 # DESCRIPTION
 # ============================================================
 
+
 def extract_description(
     event: dict[str, Any],
     soup: BeautifulSoup,
@@ -1126,7 +1510,24 @@ def extract_description(
 
     if meta:
         value = clean_text(
-            meta.get("content"),
+            meta.get("content")
+        )
+
+        if value:
+            return value[:1000]
+
+    og_description = soup.find(
+        "meta",
+        attrs={
+            "property": "og:description"
+        },
+    )
+
+    if og_description:
+        value = clean_text(
+            og_description.get(
+                "content"
+            )
         )
 
         if value:
@@ -1136,8 +1537,87 @@ def extract_description(
 
 
 # ============================================================
+# PLATFORM / PAGE SIGNALS
+# ============================================================
+
+
+def detect_platform(
+    url: str,
+    text: str,
+) -> str:
+    combined = (
+        f"{url} {text}"
+    ).lower()
+
+    if "meetup.com" in combined:
+        return "Meetup"
+
+    if "lu.ma" in combined:
+        return "Luma"
+
+    if "eventbrite" in combined:
+        return "Eventbrite"
+
+    if "owasp.org" in combined:
+        return "OWASP"
+
+    if "bsides" in combined:
+        return "BSides"
+
+    return ""
+
+
+def extract_platform_event_title(
+    title: str,
+    text: str,
+    url: str,
+) -> str:
+    """
+    Recover a useful event title when the page title
+    is generic, especially for Meetup/Luma pages.
+    """
+
+    title = clean_text(title)
+
+    if title and title.lower() not in {
+        "meetup",
+        "luma",
+        "eventbrite",
+        "events",
+        "event",
+        "sign in",
+        "log in",
+    }:
+        return title
+
+    patterns = [
+        r"(?:event|title)\s*[:\-]\s*"
+        r"([^|]{5,180})",
+        r"join\s+(.{5,160})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            value = normalize_space(
+                match.group(1)
+            )
+
+            if value:
+                return value
+
+    return title
+
+
+# ============================================================
 # LISTING PAGE DETECTION
 # ============================================================
+
 
 def is_probable_listing_page(
     title: str,
@@ -1145,7 +1625,9 @@ def is_probable_listing_page(
     event: dict[str, Any],
     dates: list[str],
 ) -> bool:
-    title_lower = title.lower().strip()
+    title_lower = (
+        title.lower().strip()
+    )
 
     if any(
         phrase in title_lower
@@ -1154,6 +1636,11 @@ def is_probable_listing_page(
         return True
 
     if not event:
+        # A page with many dates and no structured
+        # individual event is almost certainly a listing.
+        if len(dates) >= 8:
+            return True
+
         return False
 
     event_name = clean_text(
@@ -1171,17 +1658,12 @@ def is_probable_listing_page(
         if phrase in page_lower
     )
 
-    # A page with many unrelated dates is normally an
-    # index/calendar rather than one individual event.
     if len(dates) >= 8:
         return True
 
     if listing_signal_count >= 3:
         return True
 
-    # Generic "Global Events" / "Regional Events" names
-    # are category/index pages unless they have a concrete
-    # event start date.
     generic_names = {
         "global events",
         "regional events",
@@ -1190,6 +1672,8 @@ def is_probable_listing_page(
         "events",
         "events calendar",
         "event calendar",
+        "partner events",
+        "appsec days events",
     }
 
     if event_name in generic_names:
@@ -1210,6 +1694,7 @@ def is_probable_listing_page(
 # ============================================================
 # CYBERSECURITY VALIDATION
 # ============================================================
+
 
 def cybersecurity_relevance(
     title: str,
@@ -1248,6 +1733,7 @@ def event_relevance(
 # ============================================================
 # SCORING
 # ============================================================
+
 
 def calculate_score(
     result: VerificationResult,
@@ -1290,8 +1776,20 @@ def calculate_score(
     if result.is_event_page:
         score += 5
 
-    # Strong caps prevent weak/index pages from receiving
-    # high confidence.
+    # A real event with strong page-level evidence
+    # should not be destroyed merely because Schema.org
+    # is absent.
+    if (
+        result.reachable
+        and result.has_cyber_signal
+        and result.has_event_signal
+        and result.has_date_signal
+        and result.has_future_date
+    ):
+        score += 10
+
+    # Strong caps prevent weak/index pages from
+    # receiving high confidence.
     if not result.has_cyber_signal:
         score = min(score, 25)
 
@@ -1308,7 +1806,14 @@ def calculate_score(
         score = min(score, 35)
 
     if result.rejected_reason:
-        score = min(score, 35)
+        # Hard rejection reasons should keep
+        # the score below the acceptance threshold.
+        if (
+            "listing" in result.rejected_reason.lower()
+            or "index" in result.rejected_reason.lower()
+            or "category" in result.rejected_reason.lower()
+        ):
+            score = min(score, 20)
 
     if is_listing_result(result):
         score = min(score, 20)
@@ -1323,7 +1828,8 @@ def is_listing_result(
     result: VerificationResult,
 ) -> bool:
     reason = (
-        result.rejected_reason or ""
+        result.rejected_reason
+        or ""
     ).lower()
 
     return (
@@ -1339,6 +1845,7 @@ def verification_score(
     """
     Compatibility helper used by pipeline.py.
     """
+
     if not isinstance(
         result,
         VerificationResult,
@@ -1358,6 +1865,7 @@ def verification_score(
 # MAIN VERIFICATION
 # ============================================================
 
+
 def verify_event(
     url: str,
 ) -> VerificationResult:
@@ -1365,7 +1873,9 @@ def verify_event(
         event_url=url,
     )
 
-    reachable, final_url, html = fetch_page(url)
+    reachable, final_url, html = fetch_page(
+        url
+    )
 
     result.reachable = reachable
     result.event_url = final_url
@@ -1374,7 +1884,11 @@ def verify_event(
         result.rejected_reason = (
             "Page could not be reached"
         )
-        result.score = calculate_score(result)
+
+        result.score = calculate_score(
+            result
+        )
+
         return result
 
     soup = BeautifulSoup(
@@ -1382,12 +1896,19 @@ def verify_event(
         "html.parser",
     )
 
-    for element in soup(
+    # Keep a clean soup for visible text.
+    visible_soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    for element in visible_soup(
         [
             "script",
             "style",
             "noscript",
             "svg",
+            "template",
         ]
     ):
         element.decompose()
@@ -1399,20 +1920,28 @@ def verify_event(
     )
 
     text = normalize_space(
-        soup.get_text(
+        visible_soup.get_text(
             " ",
             strip=True,
         )
     )
 
-    result.title = title
-    result.text = text[:10000]
+    result.title = (
+        extract_platform_event_title(
+            title,
+            text,
+            final_url,
+        )
+    )
+
+    result.text = text[:20000]
+
+    # --------------------------------------------------------
+    # Structured data
+    # --------------------------------------------------------
 
     jsonld_objects = extract_jsonld(
-        BeautifulSoup(
-            html,
-            "html.parser",
-        )
+        soup
     )
 
     structured_event = find_structured_event(
@@ -1462,36 +1991,72 @@ def verify_event(
         structured_location_text
     )
 
-    result.event_venue = structured_venue
-    result.event_city = structured_city
-    result.event_state = structured_state
-    result.event_country = structured_country
+    result.event_venue = (
+        structured_venue
+    )
+
+    result.event_city = (
+        structured_city
+    )
+
+    result.event_state = (
+        structured_state
+    )
+
+    result.event_country = (
+        structured_country
+    )
 
     result.event_time = extract_time(
         structured_event,
         text,
     )
 
-    result.event_organizer = extract_organizer(
-        structured_event,
-        text,
+    result.event_organizer = (
+        extract_organizer(
+            structured_event,
+            text,
+        )
     )
 
-    result.event_type = extract_event_type(
-        structured_event,
-        text,
+    result.event_type = (
+        extract_event_type(
+            structured_event,
+            text,
+        )
     )
 
-    result.event_price = extract_price(
-        structured_event,
-        text,
+    result.event_price = (
+        extract_price(
+            structured_event,
+            text,
+        )
     )
 
-    result.event_description = extract_description(
-        structured_event,
-        soup,
-        text,
+    result.event_description = (
+        extract_description(
+            structured_event,
+            soup,
+            text,
+        )
     )
+
+    # --------------------------------------------------------
+    # Fallback title extraction
+    # --------------------------------------------------------
+
+    if not result.title:
+        meta_title = soup.find(
+            "meta",
+            attrs={
+                "property": "og:title"
+            },
+        )
+
+        if meta_title:
+            result.title = clean_text(
+                meta_title.get("content")
+            )
 
     # --------------------------------------------------------
     # Fallback location
@@ -1502,20 +2067,32 @@ def verify_event(
             fallback_location,
             fallback_city,
             fallback_state,
-        ) = extract_location_from_text(text)
+        ) = extract_location_from_text(
+            text
+        )
 
         if fallback_location:
             result.event_location = (
                 fallback_location
             )
 
-            result.event_city = fallback_city
-            result.event_state = fallback_state
-            result.location_source = "Page text"
+            result.event_city = (
+                fallback_city
+            )
+
+            result.event_state = (
+                fallback_state
+            )
+
+            result.location_source = (
+                "Page text"
+            )
 
     if not result.location_source:
         if structured_location_text:
-            result.location_source = "Schema.org"
+            result.location_source = (
+                "Schema.org"
+            )
 
     # --------------------------------------------------------
     # Fallback dates
@@ -1525,20 +2102,40 @@ def verify_event(
         text
     )
 
-    if start_date:
-        detected_dates = [start_date]
-
-        if end_date and end_date != start_date:
-            detected_dates.append(end_date)
-
-    else:
-        detected_dates = page_dates[:5]
-
-        if detected_dates:
-            result.event_date = (
-                detected_dates[0]
+    if not start_date:
+        fallback_date, fallback_source = (
+            extract_primary_date_from_text(
+                text
             )
-            result.date_source = "Page text"
+        )
+
+        if fallback_date:
+            result.event_date = (
+                fallback_date
+            )
+
+            result.date_source = (
+                fallback_source
+            )
+
+    detected_dates = []
+
+    if result.event_date:
+        detected_dates.append(
+            result.event_date
+        )
+
+    if (
+        result.event_end_date
+        and result.event_end_date
+        != result.event_date
+    ):
+        detected_dates.append(
+            result.event_end_date
+        )
+
+    if not detected_dates:
+        detected_dates = page_dates[:5]
 
     result.detected_dates = detected_dates
 
@@ -1561,10 +2158,7 @@ def verify_event(
 
     result.registration_url = (
         extract_registration_url(
-            BeautifulSoup(
-                html,
-                "html.parser",
-            ),
+            soup,
             final_url,
         )
     )
@@ -1572,7 +2166,9 @@ def verify_event(
     result.has_registration_signal = bool(
         result.registration_url
         or re.search(
-            r"\b(register|registration|rsvp|tickets|sign up)\b",
+            r"\b(register|registration|"
+            r"rsvp|tickets|sign up|"
+            r"reserve|join event)\b",
             text,
             flags=re.IGNORECASE,
         )
@@ -1604,7 +2200,10 @@ def verify_event(
 
     result.is_event_page = (
         result.has_event_signal
-        and result.structured_event_found
+        and (
+            result.structured_event_found
+            or result.has_date_signal
+        )
     )
 
     # --------------------------------------------------------
@@ -1630,14 +2229,15 @@ def verify_event(
 
     if result.event_date:
         result.has_date_signal = True
+
         result.has_future_date = (
             date_is_current_or_future(
                 result.event_date
             )
         )
 
-    # Do not accept an extracted date from a listing
-    # page as a real event date.
+    # Do not accept an extracted date from a
+    # listing page as a real event date.
     if is_listing_result(result):
         result.event_date = ""
         result.event_end_date = ""
@@ -1664,6 +2264,36 @@ def verify_event(
     result.is_india_event = (
         result.has_india_location
     )
+
+    # --------------------------------------------------------
+    # Strong foreign-event rejection
+    # --------------------------------------------------------
+
+    foreign_location = detect_foreign_location(
+        result.event_location
+    )
+
+    foreign_page_signal = (
+        detect_foreign_location(text)
+    )
+
+    if foreign_location:
+        result.has_india_location = False
+        result.is_india_event = False
+
+    # Clearly foreign pages must not be treated
+    # as Indian online events merely because they
+    # happen to be online.
+    if (
+        result.event_mode == "Online"
+        and foreign_page_signal
+        and not contains_keyword(
+            text,
+            INDIA_KEYWORDS,
+        )
+    ):
+        result.has_india_location = False
+        result.is_india_event = False
 
     # --------------------------------------------------------
     # Hard rejection rules
@@ -1697,20 +2327,25 @@ def verify_event(
         result.event_mode != "Online"
         and not result.has_india_location
     ):
-        foreign = detect_foreign_location(
-            result.event_location
-        )
-
-        if foreign:
+        if foreign_location:
             result.rejected_reason = (
                 f"Physical event is outside India "
-                f"({foreign})"
+                f"({foreign_location})"
             )
 
         else:
             result.rejected_reason = (
                 "Physical/hybrid event location "
                 "could not be verified as India"
+            )
+
+    elif (
+        result.event_mode == "Online"
+        and not result.has_india_location
+    ):
+        if foreign_page_signal:
+            result.rejected_reason = (
+                "Online event is clearly outside India"
             )
 
     # --------------------------------------------------------
@@ -1722,7 +2357,9 @@ def verify_event(
             result.event_price.lower().strip()
             in PRICE_FALSE_POSITIVES
         ):
-            result.event_price = "Not specified"
+            result.event_price = (
+                "Not specified"
+            )
 
     if (
         result.event_date
@@ -1731,6 +2368,7 @@ def verify_event(
         start = parse_date_string(
             result.event_date
         )
+
         end = parse_date_string(
             result.event_end_date
         )
@@ -1750,7 +2388,9 @@ def verify_event(
                 # Reject absurd multi-year ranges.
                 if (
                     end_dt < start_dt
-                    or (end_dt - start_dt).days > 31
+                    or (
+                        end_dt - start_dt
+                    ).days > 31
                 ):
                     result.event_end_date = ""
 
@@ -1771,6 +2411,7 @@ def verify_event(
 # ============================================================
 # TODAY HELPER
 # ============================================================
+
 
 def event_is_today(
     result: VerificationResult,
@@ -1801,6 +2442,7 @@ def event_is_today(
 # CLI TEST
 # ============================================================
 
+
 if __name__ == "__main__":
     import sys
 
@@ -1808,6 +2450,7 @@ if __name__ == "__main__":
         print(
             "Usage: python verifier.py <URL>"
         )
+
         raise SystemExit(1)
 
     url = sys.argv[1]
@@ -1818,7 +2461,8 @@ if __name__ == "__main__":
         json.dumps(
             {
                 key: value
-                for key, value in result.__dict__.items()
+                for key, value
+                in result.__dict__.items()
             },
             indent=2,
             ensure_ascii=False,
